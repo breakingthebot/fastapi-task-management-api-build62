@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-02
+
+### Added
+- Webhooks & Real-Time Event Subscription system.
+- Database model `WebhookModel` storing target receiver URLs, secret signing tokens, and active states.
+- Webhook registration endpoint `POST /webhooks`, listing endpoint `GET /webhooks`, and deletion endpoint `DELETE /webhooks/{webhook_id}`.
+- Async background webhook event dispatcher (`dispatch_webhook_event`) using HTTPX.
+- HMAC-SHA256 signature calculation over raw JSON payloads, sent in header `X-Webhook-Signature` (`sha256=...`).
+- Automatic webhook dispatches triggered on `task.created`, `task.updated`, and `task.deleted` lifecycle events.
+- Webhook test suite in `tests/test_webhooks.py` covering registration, listing, deletion, HMAC signature calculation, and tenant isolation.
+
 ## [0.5.0] - 2026-08-02
 
 ### Added

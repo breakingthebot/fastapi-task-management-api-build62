@@ -1,11 +1,11 @@
 # src/task_api/schemas.py
-# Pydantic schemas for User authentication, Task validation, File Attachments, Tags, Exports, and OpenAPI docs.
+# Pydantic schemas for Users, Tasks, File Attachments, Tags, Webhooks, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 from typing import Optional, List
 from datetime import datetime
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl
 from task_api.models import TaskStatus, TaskPriority
 
 
@@ -88,6 +88,34 @@ class AttachmentListResponse(BaseModel):
     """Container for listing attachments linked to a task."""
     total: int
     attachments: List[AttachmentResponse]
+
+
+# Webhook Schemas
+class WebhookBase(BaseModel):
+    """Base fields for webhook registration."""
+    target_url: HttpUrl = Field(..., description="Target HTTP/HTTPS receiver URL", json_schema_extra={"example": "https://api.example.com/webhook-listener"})
+
+
+class WebhookCreate(WebhookBase):
+    """Schema for registering a webhook listener."""
+    secret_token: Optional[str] = Field(None, max_length=128, description="Optional custom secret key for HMAC signing")
+
+
+class WebhookResponse(WebhookBase):
+    """Schema for returning webhook details."""
+    id: int
+    owner_id: int
+    secret_token: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WebhookListResponse(BaseModel):
+    """Container for listing user webhooks."""
+    total: int
+    webhooks: List[WebhookResponse]
 
 
 # Background Export Schemas

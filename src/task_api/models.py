@@ -1,5 +1,5 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for User Accounts, Tasks, File Attachments, and Tags.
+# SQLAlchemy ORM Data Models for User Accounts, Tasks, File Attachments, Tags, and Webhooks.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -52,6 +52,7 @@ class UserModel(Base):
     tasks = relationship("TaskModel", back_populates="owner", cascade="all, delete-orphan")
     attachments = relationship("AttachmentModel", back_populates="owner", cascade="all, delete-orphan")
     tags = relationship("TagModel", back_populates="owner", cascade="all, delete-orphan")
+    webhooks = relationship("WebhookModel", back_populates="owner", cascade="all, delete-orphan")
 
 
 class TagModel(Base):
@@ -103,3 +104,17 @@ class AttachmentModel(Base):
 
     task = relationship("TaskModel", back_populates="attachments")
     owner = relationship("UserModel", back_populates="attachments")
+
+
+class WebhookModel(Base):
+    """SQLAlchemy Webhook model storing user event subscription targets and secret keys."""
+    __tablename__ = "webhooks"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    target_url = Column(String(512), nullable=False)
+    secret_token = Column(String(128), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    owner = relationship("UserModel", back_populates="webhooks")

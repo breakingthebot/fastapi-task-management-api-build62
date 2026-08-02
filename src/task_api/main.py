@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining authentication, protected tasks, file attachments, tags, and background execution.
+# FastAPI application entry point defining authentication, tasks, attachments, tags, webhooks, and background processing.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py
 # Created: 2026-08-02
 
@@ -20,11 +20,12 @@ from task_api.schemas import (
     UserCreate, UserResponse, Token,
     TaskCreate, TaskUpdate, TaskResponse, TaskListResponse,
     AttachmentResponse, AttachmentListResponse, TaskExportResponse,
-    TagCreate, TagResponse, TagListResponse
+    TagCreate, TagResponse, TagListResponse,
+    WebhookCreate, WebhookResponse, WebhookListResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
-from task_api.services import send_urgent_task_notification, generate_task_csv_export
+from task_api.services import send_urgent_task_notification, generate_task_csv_export, dispatch_webhook_event
 
 # Create database tables automatically on startup
 Base.metadata.create_all(bind=engine)
@@ -36,7 +37,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT authentication, task CRUD, file attachments, task tags, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, file attachments, tags, webhooks, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -101,6 +102,41 @@ def get_current_user_profile(current_user: UserModel = Depends(get_current_user)
     return current_user
 
 
+# Webhook Management Endpoints
+@app.post("/webhooks", response_model=WebhookResponse, status_code=status.HTTP_201_CREATED, tags=["Webhooks"], summary="Register a webhook URL")
+def register_webhook_endpoint(
+    webhook_in: WebhookCreate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Register an HTTP receiver URL to receive HMAC-signed event notifications."""
+    return crud.create_webhook(db=db, webhook_in=webhook_in, owner_id=current_user.id)
+
+
+@app.get("/webhooks", response_model=WebhookListResponse, tags=["Webhooks"], summary="List registered webhooks")
+def list_webhooks_endpoint(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """List all active webhook URLs registered by the current user."""
+    webhooks = crud.get_webhooks_by_user(db=db, owner_id=current_user.id)
+    return WebhookListResponse(total=len(webhooks), webhooks=webhooks)
+
+
+@app.delete("/webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Webhooks"], summary="Delete webhook registration")
+def delete_webhook_endpoint(
+    webhook_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Unregister a webhook URL by ID."""
+    db_webhook = crud.get_webhook_by_id(db=db, webhook_id=webhook_id, owner_id=current_user.id)
+    if not db_webhook:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Webhook with ID {webhook_id} not found.")
+    crud.delete_webhook(db=db, db_webhook=db_webhook)
+    return None
+
+
 # Tag Management Endpoints
 @app.post("/tags", response_model=TagResponse, status_code=status.HTTP_201_CREATED, tags=["Tags"], summary="Create a new tag")
 def create_tag_endpoint(
@@ -147,6 +183,10 @@ def create_task_endpoint(
             task_priority=db_task.priority.value
         )
 
+    # Trigger webhook dispatch for task.created
+    task_data = {"id": db_task.id, "title": db_task.title, "status": db_task.status.value, "priority": db_task.priority.value}
+    background_tasks.add_task(dispatch_webhook_event, "task.created", task_data, current_user.id)
+
     return db_task
 
 
@@ -161,7 +201,7 @@ def list_tasks_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Retrieve a paginated list of tasks owned by the current user with optional filtering by status, priority, keyword search, or tag."""
+    """Retrieve a paginated list of tasks owned by the current user with optional filtering."""
     tasks, total = crud.get_tasks(
         db=db,
         owner_id=current_user.id,
@@ -195,6 +235,7 @@ def get_task_endpoint(
 def update_task_endpoint(
     task_id: int,
     task_in: TaskUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
@@ -205,12 +246,19 @@ def update_task_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task with ID {task_id} not found."
         )
-    return crud.update_task(db=db, db_task=db_task, task_in=task_in)
+    updated_task = crud.update_task(db=db, db_task=db_task, task_in=task_in)
+
+    # Trigger webhook dispatch for task.updated
+    task_data = {"id": updated_task.id, "title": updated_task.title, "status": updated_task.status.value, "priority": updated_task.priority.value}
+    background_tasks.add_task(dispatch_webhook_event, "task.updated", task_data, current_user.id)
+
+    return updated_task
 
 
 @app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"], summary="Delete task by ID")
 def delete_task_endpoint(
     task_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
@@ -221,7 +269,12 @@ def delete_task_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task with ID {task_id} not found."
         )
+    deleted_id = db_task.id
     crud.delete_task(db=db, db_task=db_task)
+
+    # Trigger webhook dispatch for task.deleted
+    background_tasks.add_task(dispatch_webhook_event, "task.deleted", {"id": deleted_id}, current_user.id)
+
     return None
 
 

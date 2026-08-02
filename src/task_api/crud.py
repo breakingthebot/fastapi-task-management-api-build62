@@ -1,12 +1,13 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, and Tag objects.
+# Database interaction logic and queries for User, Task, Attachment, Tag, and Webhook objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
+import secrets
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from task_api.models import UserModel, TaskModel, AttachmentModel, TagModel, TaskStatus, TaskPriority
-from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate
+from task_api.models import UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, TaskStatus, TaskPriority
+from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate, WebhookCreate
 from task_api.auth import get_password_hash
 
 
@@ -34,6 +35,44 @@ def get_user_by_email(db: Session, email: str) -> Optional[UserModel]:
 def get_user_by_id(db: Session, user_id: int) -> Optional[UserModel]:
     """Retrieve a user account by unique integer ID."""
     return db.query(UserModel).filter(UserModel.id == user_id).first()
+
+
+# Webhook CRUD Operations
+def create_webhook(db: Session, webhook_in: WebhookCreate, owner_id: int) -> WebhookModel:
+    """Register a new webhook URL with auto-generated or custom HMAC secret token."""
+    secret = webhook_in.secret_token or secrets.token_hex(24)
+    db_webhook = WebhookModel(
+        target_url=str(webhook_in.target_url),
+        secret_token=secret,
+        owner_id=owner_id,
+        is_active=True
+    )
+    db.add(db_webhook)
+    db.commit()
+    db.refresh(db_webhook)
+    return db_webhook
+
+
+def get_webhooks_by_user(db: Session, owner_id: int) -> List[WebhookModel]:
+    """Retrieve all active webhooks registered by a user."""
+    return db.query(WebhookModel).filter(
+        WebhookModel.owner_id == owner_id,
+        WebhookModel.is_active == True
+    ).all()
+
+
+def get_webhook_by_id(db: Session, webhook_id: int, owner_id: int) -> Optional[WebhookModel]:
+    """Retrieve a single webhook record by ID owned by user."""
+    return db.query(WebhookModel).filter(
+        WebhookModel.id == webhook_id,
+        WebhookModel.owner_id == owner_id
+    ).first()
+
+
+def delete_webhook(db: Session, db_webhook: WebhookModel) -> None:
+    """Delete a webhook record."""
+    db.delete(db_webhook)
+    db.commit()
 
 
 # Tag CRUD Operations
