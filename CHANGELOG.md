@@ -1,0 +1,19 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-08-02
+
+### Added
+- Core FastAPI application with health check (`/health`) and version (`/version`) endpoints.
+- SQLAlchemy Task ORM model and SQLite database integration.
+- Pydantic v2 schemas for task creation, update, listing, and OpenAPI schema generation.
+- Complete CRUD API endpoints (`POST /tasks`, `GET /tasks`, `GET /tasks/{id}`, `PUT /tasks/{id}`, `DELETE /tasks/{id}`).
+- Filtering by status and priority, pagination (`skip`, `limit`), and search support.
+- Installable CLI entry point `task-api` with `--version` and `run` flags.
+- Unit and integration test suite using pytest and FastAPI TestClient.
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`).
+- MIT License and project metadata files (`pyproject.toml`, `requirements.txt`, `.env.example`, `.gitignore`).

@@ -1,0 +1,35 @@
+# AGENTS & Internal Documentation Logs (Excluded per project standards)
+AGENTS.md
+BUILD_NOTES.md
+
+# Virtual Environment & Python Artifacts
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment Variables & Secrets
+.env
+.env.local
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & Temporary Files
+*.log
+*.sqlite3
+*.db
+uploads/
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
