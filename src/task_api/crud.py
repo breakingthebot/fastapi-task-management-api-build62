@@ -1,12 +1,12 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, and Attachment objects.
+# Database interaction logic and queries for User, Task, Attachment, and Tag objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from task_api.models import UserModel, TaskModel, AttachmentModel, TaskStatus, TaskPriority
-from task_api.schemas import UserCreate, TaskCreate, TaskUpdate
+from task_api.models import UserModel, TaskModel, AttachmentModel, TagModel, TaskStatus, TaskPriority
+from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate
 from task_api.auth import get_password_hash
 
 
@@ -34,6 +34,53 @@ def get_user_by_email(db: Session, email: str) -> Optional[UserModel]:
 def get_user_by_id(db: Session, user_id: int) -> Optional[UserModel]:
     """Retrieve a user account by unique integer ID."""
     return db.query(UserModel).filter(UserModel.id == user_id).first()
+
+
+# Tag CRUD Operations
+def create_tag(db: Session, tag_in: TagCreate, owner_id: int) -> TagModel:
+    """Create a new tag entity for a user."""
+    db_tag = TagModel(
+        name=tag_in.name,
+        color=tag_in.color,
+        owner_id=owner_id
+    )
+    db.add(db_tag)
+    db.commit()
+    db.refresh(db_tag)
+    return db_tag
+
+
+def get_tags(db: Session, owner_id: int) -> List[TagModel]:
+    """Retrieve all tags owned by a user."""
+    return db.query(TagModel).filter(TagModel.owner_id == owner_id).all()
+
+
+def get_tag_by_id(db: Session, tag_id: int, owner_id: int) -> Optional[TagModel]:
+    """Retrieve a single tag by ID owned by user."""
+    return db.query(TagModel).filter(TagModel.id == tag_id, TagModel.owner_id == owner_id).first()
+
+
+def get_tag_by_name(db: Session, name: str, owner_id: int) -> Optional[TagModel]:
+    """Retrieve tag by name owned by user."""
+    return db.query(TagModel).filter(TagModel.name.ilike(name), TagModel.owner_id == owner_id).first()
+
+
+def add_tag_to_task(db: Session, db_task: TaskModel, db_tag: TagModel) -> TaskModel:
+    """Link a tag to a task if not already associated."""
+    if db_tag not in db_task.tags:
+        db_task.tags.append(db_tag)
+        db.commit()
+        db.refresh(db_task)
+    return db_task
+
+
+def remove_tag_from_task(db: Session, db_task: TaskModel, db_tag: TagModel) -> TaskModel:
+    """Remove a tag link from a task."""
+    if db_tag in db_task.tags:
+        db_task.tags.remove(db_tag)
+        db.commit()
+        db.refresh(db_task)
+    return db_task
 
 
 # Task CRUD Operations (User-Scoped)
@@ -65,9 +112,10 @@ def get_tasks(
     limit: int = 50,
     status: Optional[TaskStatus] = None,
     priority: Optional[TaskPriority] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    tag: Optional[str] = None
 ) -> Tuple[List[TaskModel], int]:
-    """Retrieve a paginated list of tasks belonging to owner_id with optional filters."""
+    """Retrieve a paginated list of tasks belonging to owner_id with optional filters including tag name."""
     query = db.query(TaskModel).filter(TaskModel.owner_id == owner_id)
 
     if status:
@@ -76,6 +124,8 @@ def get_tasks(
         query = query.filter(TaskModel.priority == priority)
     if search:
         query = query.filter(TaskModel.title.icontains(search) | TaskModel.description.icontains(search))
+    if tag:
+        query = query.join(TaskModel.tags).filter(TagModel.name.ilike(tag))
 
     total = query.count()
     tasks = query.order_by(TaskModel.id.desc()).offset(skip).limit(limit).all()

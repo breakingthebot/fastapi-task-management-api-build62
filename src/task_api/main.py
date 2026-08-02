@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining authentication, protected tasks, file attachments, and background task execution.
+# FastAPI application entry point defining authentication, protected tasks, file attachments, tags, and background execution.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py
 # Created: 2026-08-02
 
@@ -19,7 +19,8 @@ from task_api.models import TaskStatus, TaskPriority, UserModel
 from task_api.schemas import (
     UserCreate, UserResponse, Token,
     TaskCreate, TaskUpdate, TaskResponse, TaskListResponse,
-    AttachmentResponse, AttachmentListResponse, TaskExportResponse
+    AttachmentResponse, AttachmentListResponse, TaskExportResponse,
+    TagCreate, TagResponse, TagListResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
@@ -35,7 +36,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT authentication, task CRUD, file attachments, and background task processing.",
+    description="A robust FastAPI REST service providing JWT authentication, task CRUD, file attachments, task tags, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -100,6 +101,33 @@ def get_current_user_profile(current_user: UserModel = Depends(get_current_user)
     return current_user
 
 
+# Tag Management Endpoints
+@app.post("/tags", response_model=TagResponse, status_code=status.HTTP_201_CREATED, tags=["Tags"], summary="Create a new tag")
+def create_tag_endpoint(
+    tag_in: TagCreate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Create a new task category tag for the current user."""
+    existing_tag = crud.get_tag_by_name(db=db, name=tag_in.name, owner_id=current_user.id)
+    if existing_tag:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"A tag named '{tag_in.name}' already exists."
+        )
+    return crud.create_tag(db=db, tag_in=tag_in, owner_id=current_user.id)
+
+
+@app.get("/tags", response_model=TagListResponse, tags=["Tags"], summary="List all tags for current user")
+def list_tags_endpoint(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve all category tags owned by the current user."""
+    tags = crud.get_tags(db=db, owner_id=current_user.id)
+    return TagListResponse(total=len(tags), tags=tags)
+
+
 # Protected Task Endpoints
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"], summary="Create a new task")
 def create_task_endpoint(
@@ -108,10 +136,9 @@ def create_task_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Create a new task owned by the current authenticated user. Enqueues background email alert for urgent/high priority tasks."""
+    """Create a new task owned by the current authenticated user."""
     db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
 
-    # Trigger background notification if task is HIGH or URGENT
     if db_task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
         background_tasks.add_task(
             send_urgent_task_notification,
@@ -130,10 +157,11 @@ def list_tasks_endpoint(
     status: Optional[TaskStatus] = Query(None, description="Filter by task status"),
     priority: Optional[TaskPriority] = Query(None, description="Filter by task priority"),
     search: Optional[str] = Query(None, description="Search keyword in title or description"),
+    tag: Optional[str] = Query(None, description="Filter by tag name"),
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Retrieve a paginated list of tasks owned by the current user."""
+    """Retrieve a paginated list of tasks owned by the current user with optional filtering by status, priority, keyword search, or tag."""
     tasks, total = crud.get_tasks(
         db=db,
         owner_id=current_user.id,
@@ -141,7 +169,8 @@ def list_tasks_endpoint(
         limit=limit,
         status=status,
         priority=priority,
-        search=search
+        search=search,
+        tag=tag
     )
     return TaskListResponse(total=total, tasks=tasks)
 
@@ -196,6 +225,44 @@ def delete_task_endpoint(
     return None
 
 
+@app.post("/tasks/{task_id}/tags/{tag_id}", response_model=TaskResponse, tags=["Tags"], summary="Attach tag to task")
+def attach_tag_to_task_endpoint(
+    task_id: int,
+    tag_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Associate a tag with a task owned by the current user."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task with ID {task_id} not found.")
+
+    db_tag = crud.get_tag_by_id(db=db, tag_id=tag_id, owner_id=current_user.id)
+    if not db_tag:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
+
+    return crud.add_tag_to_task(db=db, db_task=db_task, db_tag=db_tag)
+
+
+@app.delete("/tasks/{task_id}/tags/{tag_id}", response_model=TaskResponse, tags=["Tags"], summary="Remove tag from task")
+def remove_tag_from_task_endpoint(
+    task_id: int,
+    tag_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Remove a tag association from a task owned by the current user."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task with ID {task_id} not found.")
+
+    db_tag = crud.get_tag_by_id(db=db, tag_id=tag_id, owner_id=current_user.id)
+    if not db_tag:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
+
+    return crud.remove_tag_from_task(db=db, db_task=db_task, db_tag=db_tag)
+
+
 # Protected File Attachment Endpoints
 @app.post("/tasks/{task_id}/attachments", response_model=AttachmentResponse, status_code=status.HTTP_201_CREATED, tags=["Attachments"], summary="Upload task file attachment")
 def upload_attachment_endpoint(
@@ -212,7 +279,6 @@ def upload_attachment_endpoint(
             detail=f"Task with ID {task_id} not found."
         )
 
-    # Read and validate file size
     file_bytes = file.file.read()
     file_size = len(file_bytes)
 
@@ -324,7 +390,6 @@ def export_tasks_background_endpoint(
     """Trigger an asynchronous background task to export all tasks owned by the current user into a CSV file."""
     tasks, total = crud.get_tasks(db=db, owner_id=current_user.id, limit=1000)
 
-    # Convert task ORM models to dictionary list for export task
     tasks_data = [
         {
             "id": t.id,
@@ -342,7 +407,6 @@ def export_tasks_background_endpoint(
     filename = f"export_user_{current_user.id}_{uuid.uuid4().hex[:8]}.csv"
     export_filepath = os.path.join(EXPORT_DIR, filename)
 
-    # Queue non-blocking background job
     background_tasks.add_task(
         generate_task_csv_export,
         export_filepath=export_filepath,
@@ -363,7 +427,6 @@ def download_export_file_endpoint(
     current_user: UserModel = Depends(get_current_user)
 ):
     """Download a generated task CSV export file."""
-    # Prevent path traversal attacks
     safe_filename = Path(filename).name
     if not safe_filename.startswith(f"export_user_{current_user.id}_"):
         raise HTTPException(

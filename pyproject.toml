@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "task-management-api"
-version = "0.4.0"
-description = "FastAPI Task Management API — full CRUD, JWT authentication, file uploads, background tasks, OpenAPI docs"
+version = "0.5.0"
+description = "FastAPI Task Management API — full CRUD, JWT authentication, file uploads, background tasks, task tags, OpenAPI docs"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

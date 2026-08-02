@@ -1,11 +1,11 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment uploads, background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment uploads, task tagging & multi-category labeling, background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
 - **Framework**: FastAPI, Uvicorn
-- **Database**: SQLite (SQLAlchemy 2.0 ORM)
+- **Database**: SQLite (SQLAlchemy 2.0 ORM with Many-to-Many junction mapping)
 - **Security & Authentication**: JWT (python-jose), bcrypt password hashing
 - **Validation**: Pydantic v2 (with email-validator)
 - **Async & Background**: FastAPI BackgroundTasks
@@ -68,37 +68,35 @@ Run the automated test suite with pytest:
 pytest -v
 ```
 
-## API Usage & Background Tasks
+## API Usage & Features
 1. **Register & Login**: `POST /auth/register` & `POST /auth/login` to obtain a Bearer JWT access token.
-2. **Task Creation & Urgent Alerts**: Creating a task with priority `high` or `urgent` automatically triggers a non-blocking background notification log.
-3. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
-4. **Trigger Background CSV Export**:
-   ```bash
-   curl -X POST "http://127.0.0.1:8000/tasks/export" -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-   ```
-   *Response*: Returns status `202 Accepted` and target export `filename`.
-5. **Download Exported CSV**:
-   ```bash
-   curl "http://127.0.0.1:8000/exports/export_user_1_abc123.csv/download" -H "Authorization: Bearer YOUR_ACCESS_TOKEN" --output tasks_export.csv
-   ```
+2. **Category Tagging**:
+   - **Create Tag**: `POST /tags` with `{"name": "Frontend", "color": "#007bff"}`
+   - **List User Tags**: `GET /tags`
+   - **Attach Tag to Task**: `POST /tasks/{task_id}/tags/{tag_id}`
+   - **Remove Tag from Task**: `DELETE /tasks/{task_id}/tags/{tag_id}`
+   - **Filter Tasks by Tag**: `GET /tasks?tag=Frontend`
+3. **Task Creation & Urgent Alerts**: Creating a task with priority `high` or `urgent` automatically triggers a non-blocking background notification log.
+4. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
+5. **Background CSV Export**: Trigger background task via `POST /tasks/export` and download generated CSV via `GET /exports/{filename}/download`.
 
 ## Architecture Notes
 The application is structured into atomic Python modules under `src/task_api/`:
 - `config.py`: Environment configuration via Pydantic BaseSettings.
 - `auth.py`: Bcrypt password hashing, JWT encoding/decoding, and `get_current_user` FastAPI dependency.
 - `database.py`: SQLAlchemy session engine and database dependency injection (`get_db`).
-- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`).
-- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Attachments, and Background Export responses.
-- `crud.py`: Encapsulated database queries filtering data by authenticated `owner_id`.
+- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`, `TagModel`) with `task_tags` junction table.
+- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Attachments, Tags, and Background Export responses.
+- `crud.py`: Encapsulated database queries filtering data and tag associations by authenticated `owner_id`.
 - `services.py`: Background processing routines for non-blocking email alerts and CSV file generation.
 - `main.py`: FastAPI application router mounting all REST endpoints and BackgroundTasks dependencies.
 - `cli.py`: Command Line Interface entry point supporting `--version` and `run` commands.
 
 ## Data Handling
-- **Data Collected**: User credentials, task details, file attachments, and exported CSV data files.
+- **Data Collected**: User credentials, task details, category tags, file attachments, and exported CSV data files.
 - **Storage**: Retained locally in SQLite database (`DATABASE_URL`) and disk storage directories (`./uploads`, `./uploads/exports`).
-- **Sharing**: Zero third-party data sharing. Export files and attachments are strictly isolated to the owning user account.
+- **Sharing**: Zero third-party data sharing. Tags, export files, and attachments are strictly isolated to the owning user account.
 
 ## Notes
+- Many-to-many relationship: Tasks and Tags use a normalized junction table (`task_tags`) for multi-category organization.
 - Non-blocking execution: Background tasks offload email alerts and CSV file generation outside the HTTP request loop.
-- Path traversal protection: Export download routes sanitize file basenames and enforce `export_user_{id}_` prefixes.

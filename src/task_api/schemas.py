@@ -1,5 +1,5 @@
 # src/task_api/schemas.py
-# Pydantic schemas for User authentication, Task validation, File Attachments, Exports, and OpenAPI docs.
+# Pydantic schemas for User authentication, Task validation, File Attachments, Tags, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -41,6 +41,33 @@ class TokenData(BaseModel):
     """Decoded JWT payload structure."""
     user_id: Optional[int] = None
     email: Optional[str] = None
+
+
+# Tag Schemas
+class TagBase(BaseModel):
+    """Base fields for task category tags."""
+    name: str = Field(..., min_length=1, max_length=64, description="Tag label name", json_schema_extra={"example": "Work"})
+    color: str = Field(default="#6c757d", max_length=32, description="Hex color string", json_schema_extra={"example": "#007bff"})
+
+
+class TagCreate(TagBase):
+    """Schema for creating a tag."""
+    pass
+
+
+class TagResponse(TagBase):
+    """Schema for returning tag details."""
+    id: int
+    owner_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TagListResponse(BaseModel):
+    """Container for listing user tags."""
+    total: int
+    tags: List[TagResponse]
 
 
 # Attachment Schemas
@@ -101,6 +128,7 @@ class TaskResponse(TaskBase):
     owner_id: int
     created_at: datetime
     updated_at: datetime
+    tags: List[TagResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 

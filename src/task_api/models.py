@@ -1,11 +1,11 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for User Accounts, Tasks, and File Attachments.
+# SQLAlchemy ORM Data Models for User Accounts, Tasks, File Attachments, and Tags.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, ForeignKey, Boolean, Table
 from sqlalchemy.orm import relationship
 from task_api.database import Base
 
@@ -29,6 +29,15 @@ class TaskPriority(str, enum.Enum):
     URGENT = "urgent"
 
 
+# Junction table for Many-to-Many relationship between Tasks and Tags
+task_tags = Table(
+    "task_tags",
+    Base.metadata,
+    Column("task_id", Integer, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
+)
+
+
 class UserModel(Base):
     """SQLAlchemy User model storing account authentication data."""
     __tablename__ = "users"
@@ -42,6 +51,21 @@ class UserModel(Base):
 
     tasks = relationship("TaskModel", back_populates="owner", cascade="all, delete-orphan")
     attachments = relationship("AttachmentModel", back_populates="owner", cascade="all, delete-orphan")
+    tags = relationship("TagModel", back_populates="owner", cascade="all, delete-orphan")
+
+
+class TagModel(Base):
+    """SQLAlchemy Tag model for categorizing tasks with labels and colors."""
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(64), nullable=False, index=True)
+    color = Column(String(32), default="#6c757d", nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    owner = relationship("UserModel", back_populates="tags")
+    tasks = relationship("TaskModel", secondary=task_tags, back_populates="tags")
 
 
 class TaskModel(Base):
@@ -60,6 +84,7 @@ class TaskModel(Base):
 
     owner = relationship("UserModel", back_populates="tasks")
     attachments = relationship("AttachmentModel", back_populates="task", cascade="all, delete-orphan")
+    tags = relationship("TagModel", secondary=task_tags, back_populates="tasks")
 
 
 class AttachmentModel(Base):

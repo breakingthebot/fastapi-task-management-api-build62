@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-02
+
+### Added
+- Task Tagging and Multi-Category Labeling feature.
+- Database model `TagModel` and `task_tags` many-to-many junction table.
+- Create tag endpoint `POST /tags` with hex color support and duplicate name validation per user.
+- List tags endpoint `GET /tags` returning user tags.
+- Tag association endpoints `POST /tasks/{task_id}/tags/{tag_id}` and `DELETE /tasks/{task_id}/tags/{tag_id}`.
+- Tag-based task query filtering via `GET /tasks?tag={name}`.
+- Tag test suite in `tests/test_tags.py` covering creation, listing, task linking/unlinking, tag filtering, and tenant security isolation.
+
 ## [0.4.0] - 2026-08-02
 
 ### Added
