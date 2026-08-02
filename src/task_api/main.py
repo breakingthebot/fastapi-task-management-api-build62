@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining authentication, tasks, attachments, tags, webhooks, and background processing.
+# FastAPI application entry point defining authentication, tasks, attachments, tags, webhooks, activity logs, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py
 # Created: 2026-08-02
 
@@ -21,7 +21,8 @@ from task_api.schemas import (
     TaskCreate, TaskUpdate, TaskResponse, TaskListResponse,
     AttachmentResponse, AttachmentListResponse, TaskExportResponse,
     TagCreate, TagResponse, TagListResponse,
-    WebhookCreate, WebhookResponse, WebhookListResponse
+    WebhookCreate, WebhookResponse, WebhookListResponse,
+    ActivityLogResponse, ActivityLogListResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
@@ -37,7 +38,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, file attachments, tags, webhooks, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, attachments, tags, webhooks, audit activity logs, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -100,6 +101,33 @@ def login_for_access_token(
 def get_current_user_profile(current_user: UserModel = Depends(get_current_user)):
     """Retrieve details for the currently authenticated user."""
     return current_user
+
+
+# Activity Audit Log Endpoints
+@app.get("/activity", response_model=ActivityLogListResponse, tags=["Activity Audit"], summary="Get overall activity audit trail")
+def list_user_activity_logs_endpoint(
+    limit: int = Query(50, ge=1, le=200, description="Max audit entries"),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve user-wide activity audit logs."""
+    logs = crud.get_activity_logs_by_user(db=db, owner_id=current_user.id, limit=limit)
+    return ActivityLogListResponse(total=len(logs), activities=logs)
+
+
+@app.get("/tasks/{task_id}/activity", response_model=ActivityLogListResponse, tags=["Activity Audit"], summary="Get activity audit log for a task")
+def list_task_activity_logs_endpoint(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve activity audit log history for a specific task."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task with ID {task_id} not found.")
+
+    logs = crud.get_activity_logs_by_task(db=db, task_id=task_id, owner_id=current_user.id)
+    return ActivityLogListResponse(total=len(logs), activities=logs)
 
 
 # Webhook Management Endpoints
@@ -175,6 +203,15 @@ def create_task_endpoint(
     """Create a new task owned by the current authenticated user."""
     db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
 
+    # Record activity log
+    crud.create_activity_log(
+        db=db,
+        task_id=db_task.id,
+        owner_id=current_user.id,
+        action="task.created",
+        new_value=db_task.title
+    )
+
     if db_task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
         background_tasks.add_task(
             send_urgent_task_notification,
@@ -183,7 +220,6 @@ def create_task_endpoint(
             task_priority=db_task.priority.value
         )
 
-    # Trigger webhook dispatch for task.created
     task_data = {"id": db_task.id, "title": db_task.title, "status": db_task.status.value, "priority": db_task.priority.value}
     background_tasks.add_task(dispatch_webhook_event, "task.created", task_data, current_user.id)
 
@@ -201,7 +237,7 @@ def list_tasks_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Retrieve a paginated list of tasks owned by the current user with optional filtering."""
+    """Retrieve a paginated list of tasks owned by the current user."""
     tasks, total = crud.get_tasks(
         db=db,
         owner_id=current_user.id,
@@ -246,9 +282,24 @@ def update_task_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task with ID {task_id} not found."
         )
+
+    # Capture field diff for activity logging
+    update_dict = task_in.model_dump(exclude_unset=True)
+    for field, new_val in update_dict.items():
+        old_val = getattr(db_task, field)
+        if old_val != new_val:
+            crud.create_activity_log(
+                db=db,
+                task_id=db_task.id,
+                owner_id=current_user.id,
+                action="task.updated",
+                field_changed=field,
+                old_value=str(old_val),
+                new_value=str(new_val)
+            )
+
     updated_task = crud.update_task(db=db, db_task=db_task, task_in=task_in)
 
-    # Trigger webhook dispatch for task.updated
     task_data = {"id": updated_task.id, "title": updated_task.title, "status": updated_task.status.value, "priority": updated_task.priority.value}
     background_tasks.add_task(dispatch_webhook_event, "task.updated", task_data, current_user.id)
 
@@ -270,9 +321,17 @@ def delete_task_endpoint(
             detail=f"Task with ID {task_id} not found."
         )
     deleted_id = db_task.id
+    task_title = db_task.title
     crud.delete_task(db=db, db_task=db_task)
 
-    # Trigger webhook dispatch for task.deleted
+    crud.create_activity_log(
+        db=db,
+        task_id=None,
+        owner_id=current_user.id,
+        action="task.deleted",
+        old_value=task_title
+    )
+
     background_tasks.add_task(dispatch_webhook_event, "task.deleted", {"id": deleted_id}, current_user.id)
 
     return None
@@ -294,7 +353,17 @@ def attach_tag_to_task_endpoint(
     if not db_tag:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
 
-    return crud.add_tag_to_task(db=db, db_task=db_task, db_tag=db_tag)
+    updated_task = crud.add_tag_to_task(db=db, db_task=db_task, db_tag=db_tag)
+
+    crud.create_activity_log(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        action="tag.attached",
+        new_value=db_tag.name
+    )
+
+    return updated_task
 
 
 @app.delete("/tasks/{task_id}/tags/{tag_id}", response_model=TaskResponse, tags=["Tags"], summary="Remove tag from task")
@@ -313,7 +382,17 @@ def remove_tag_from_task_endpoint(
     if not db_tag:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
 
-    return crud.remove_tag_from_task(db=db, db_task=db_task, db_tag=db_tag)
+    updated_task = crud.remove_tag_from_task(db=db, db_task=db_task, db_tag=db_tag)
+
+    crud.create_activity_log(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        action="tag.removed",
+        old_value=db_tag.name
+    )
+
+    return updated_task
 
 
 # Protected File Attachment Endpoints
@@ -363,6 +442,14 @@ def upload_attachment_endpoint(
         file_path=stored_path,
         content_type=file.content_type or "application/octet-stream",
         file_size_bytes=file_size
+    )
+
+    crud.create_activity_log(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        action="attachment.uploaded",
+        new_value=file.filename
     )
 
     return attachment
@@ -426,10 +513,22 @@ def delete_attachment_endpoint(
             detail=f"Attachment with ID {attachment_id} not found."
         )
 
+    filename = attachment.filename
+    task_id = attachment.task_id
+
     if os.path.exists(attachment.file_path):
         os.remove(attachment.file_path)
 
     crud.delete_attachment(db=db, db_attachment=attachment)
+
+    crud.create_activity_log(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        action="attachment.deleted",
+        old_value=filename
+    )
+
     return None
 
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-02
+
+### Added
+- Task Activity Logging and Revision Audit Trail system.
+- Database model `ActivityLogModel` storing immutable action logs (`task.created`, `task.updated`, `task.deleted`, `tag.attached`, `tag.removed`, `attachment.uploaded`, `attachment.deleted`).
+- Granular field-level diff tracking (`field_changed`, `old_value`, `new_value`) on task updates.
+- Task activity audit log endpoint `GET /tasks/{task_id}/activity`.
+- User overall activity audit trail endpoint `GET /activity`.
+- Activity log test suite in `tests/test_activity.py` covering creation logs, field diffs, tag/attachment events, overall audit retrieval, and tenant security isolation.
+
 ## [0.6.0] - 2026-08-02
 
 ### Added

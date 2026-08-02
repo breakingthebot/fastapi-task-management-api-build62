@@ -1,12 +1,12 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, Tag, and Webhook objects.
+# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, and ActivityLog objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 import secrets
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from task_api.models import UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, TaskStatus, TaskPriority
+from task_api.models import UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, ActivityLogModel, TaskStatus, TaskPriority
 from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate, WebhookCreate
 from task_api.auth import get_password_hash
 
@@ -35,6 +35,46 @@ def get_user_by_email(db: Session, email: str) -> Optional[UserModel]:
 def get_user_by_id(db: Session, user_id: int) -> Optional[UserModel]:
     """Retrieve a user account by unique integer ID."""
     return db.query(UserModel).filter(UserModel.id == user_id).first()
+
+
+# Activity Log CRUD Operations
+def create_activity_log(
+    db: Session,
+    owner_id: int,
+    action: str,
+    task_id: Optional[int] = None,
+    field_changed: Optional[str] = None,
+    old_value: Optional[str] = None,
+    new_value: Optional[str] = None
+) -> ActivityLogModel:
+    """Record an immutable activity audit log entry."""
+    log_entry = ActivityLogModel(
+        task_id=task_id,
+        owner_id=owner_id,
+        action=action,
+        field_changed=field_changed,
+        old_value=str(old_value) if old_value is not None else None,
+        new_value=str(new_value) if new_value is not None else None
+    )
+    db.add(log_entry)
+    db.commit()
+    db.refresh(log_entry)
+    return log_entry
+
+
+def get_activity_logs_by_task(db: Session, task_id: int, owner_id: int) -> List[ActivityLogModel]:
+    """Retrieve activity audit trail entries for a specific task."""
+    return db.query(ActivityLogModel).filter(
+        ActivityLogModel.task_id == task_id,
+        ActivityLogModel.owner_id == owner_id
+    ).order_by(ActivityLogModel.id.desc()).all()
+
+
+def get_activity_logs_by_user(db: Session, owner_id: int, limit: int = 100) -> List[ActivityLogModel]:
+    """Retrieve overall activity audit trail entries for a user."""
+    return db.query(ActivityLogModel).filter(
+        ActivityLogModel.owner_id == owner_id
+    ).order_by(ActivityLogModel.id.desc()).limit(limit).all()
 
 
 # Webhook CRUD Operations

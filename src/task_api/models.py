@@ -1,5 +1,5 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for User Accounts, Tasks, File Attachments, Tags, and Webhooks.
+# SQLAlchemy ORM Data Models for User Accounts, Tasks, File Attachments, Tags, Webhooks, and Activity Logs.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -53,6 +53,7 @@ class UserModel(Base):
     attachments = relationship("AttachmentModel", back_populates="owner", cascade="all, delete-orphan")
     tags = relationship("TagModel", back_populates="owner", cascade="all, delete-orphan")
     webhooks = relationship("WebhookModel", back_populates="owner", cascade="all, delete-orphan")
+    activity_logs = relationship("ActivityLogModel", back_populates="owner", cascade="all, delete-orphan")
 
 
 class TagModel(Base):
@@ -86,6 +87,7 @@ class TaskModel(Base):
     owner = relationship("UserModel", back_populates="tasks")
     attachments = relationship("AttachmentModel", back_populates="task", cascade="all, delete-orphan")
     tags = relationship("TagModel", secondary=task_tags, back_populates="tasks")
+    activity_logs = relationship("ActivityLogModel", back_populates="task", cascade="all, delete-orphan")
 
 
 class AttachmentModel(Base):
@@ -118,3 +120,20 @@ class WebhookModel(Base):
     created_at = Column(DateTime, default=utc_now, nullable=False)
 
     owner = relationship("UserModel", back_populates="webhooks")
+
+
+class ActivityLogModel(Base):
+    """SQLAlchemy ActivityLog model storing granular revision history for task actions."""
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    action = Column(String(64), nullable=False, index=True)
+    field_changed = Column(String(64), nullable=True)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=utc_now, nullable=False)
+
+    task = relationship("TaskModel", back_populates="activity_logs")
+    owner = relationship("UserModel", back_populates="activity_logs")

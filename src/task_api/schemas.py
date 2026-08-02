@@ -1,5 +1,5 @@
 # src/task_api/schemas.py
-# Pydantic schemas for Users, Tasks, File Attachments, Tags, Webhooks, Exports, and OpenAPI docs.
+# Pydantic schemas for Users, Tasks, File Attachments, Tags, Webhooks, Activity Logs, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -116,6 +116,27 @@ class WebhookListResponse(BaseModel):
     """Container for listing user webhooks."""
     total: int
     webhooks: List[WebhookResponse]
+
+
+# Activity Log Schemas
+class ActivityLogResponse(BaseModel):
+    """Schema for returning task activity audit logs."""
+    id: int
+    task_id: Optional[int]
+    owner_id: int
+    action: str
+    field_changed: Optional[str]
+    old_value: Optional[str]
+    new_value: Optional[str]
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ActivityLogListResponse(BaseModel):
+    """Container for listing activity logs."""
+    total: int
+    activities: List[ActivityLogResponse]
 
 
 # Background Export Schemas

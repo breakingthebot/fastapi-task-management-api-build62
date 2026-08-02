@@ -1,6 +1,6 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment uploads, task tagging & multi-category labeling, webhooks & real-time event subscriptions (HMAC-SHA256 signed), background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment uploads, task tagging & multi-category labeling, webhooks & real-time event subscriptions (HMAC-SHA256 signed), task activity audit trail logging, background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
@@ -70,33 +70,31 @@ pytest -v
 
 ## API Usage & Features
 1. **Register & Login**: `POST /auth/register` & `POST /auth/login` to obtain a Bearer JWT access token.
-2. **Webhooks & Real-Time Event Subscriptions**:
-   - **Register Webhook**: `POST /webhooks` with `{"target_url": "https://example.com/webhook", "secret_token": "my_secret"}`
-   - **List Webhooks**: `GET /webhooks`
-   - **Delete Webhook**: `DELETE /webhooks/{webhook_id}`
-   - **Event Payloads**: Dispatches `task.created`, `task.updated`, and `task.deleted` events via HTTP POST with `X-Webhook-Event` and `X-Webhook-Signature` (`sha256=...`) headers.
-3. **Category Tagging**:
-   - `POST /tags`, `GET /tags`, `POST /tasks/{task_id}/tags/{tag_id}`, `DELETE /tasks/{task_id}/tags/{tag_id}`, `GET /tasks?tag=Work`
-4. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
-5. **Background CSV Export & Priority Alerts**: `POST /tasks/export` and `GET /exports/{filename}/download`.
+2. **Task Activity Audit Trail**:
+   - **Task Audit Log**: `GET /tasks/{task_id}/activity` returning revision entries, field diffs (`old_value` -> `new_value`), tag attachments, and file upload events.
+   - **Overall User Audit Log**: `GET /activity` returning user-wide audit trail.
+3. **Webhooks & Real-Time Event Subscriptions**: `POST /webhooks`, `GET /webhooks`, `DELETE /webhooks/{webhook_id}` with HMAC-SHA256 signature headers.
+4. **Category Tagging**: `POST /tags`, `GET /tags`, `POST /tasks/{task_id}/tags/{tag_id}`, `DELETE /tasks/{task_id}/tags/{tag_id}`, `GET /tasks?tag=Work`.
+5. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
+6. **Background CSV Export & Priority Alerts**: `POST /tasks/export` and `GET /exports/{filename}/download`.
 
 ## Architecture Notes
 The application is structured into atomic Python modules under `src/task_api/`:
 - `config.py`: Environment configuration via Pydantic BaseSettings.
 - `auth.py`: Bcrypt password hashing, JWT encoding/decoding, and `get_current_user` FastAPI dependency.
 - `database.py`: SQLAlchemy session engine and database dependency injection (`get_db`).
-- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`, `TagModel`, `WebhookModel`).
-- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Attachments, Tags, Webhooks, and Export responses.
+- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`, `TagModel`, `WebhookModel`, `ActivityLogModel`).
+- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, and Export responses.
 - `crud.py`: Encapsulated database queries filtering data by authenticated `owner_id`.
 - `services.py`: Background processing routines for non-blocking email alerts, CSV file generation, and HMAC-SHA256 webhook event dispatches.
 - `main.py`: FastAPI application router mounting all REST endpoints and BackgroundTasks dependencies.
 - `cli.py`: Command Line Interface entry point supporting `--version` and `run` commands.
 
 ## Data Handling
-- **Data Collected**: User credentials, task details, category tags, file attachments, webhook URLs/secrets, and exported CSV data files.
+- **Data Collected**: User credentials, task details, category tags, file attachments, webhook URLs/secrets, activity audit logs, and exported CSV data files.
 - **Storage**: Retained locally in SQLite database (`DATABASE_URL`) and disk storage directories (`./uploads`, `./uploads/exports`).
-- **Sharing**: Zero third-party data sharing. Webhooks are dispatched exclusively to target URLs registered by the user.
+- **Sharing**: Zero third-party data sharing. Audit logs are strictly isolated to the owning user account.
 
 ## Notes
-- Signature Verification: Webhook payloads include an HMAC-SHA256 hex signature header (`X-Webhook-Signature`) computed over the raw JSON payload.
-- Non-blocking execution: Webhook dispatches run as background tasks to prevent receiver latency from affecting API response times.
+- Audit Logging: Captures field-level diffs (`field_changed`, `old_value`, `new_value`) for task updates, tag changes, and file uploads.
+- Multi-Tenant Security: Access to activity logs is strictly restricted to the user who owns the task.
