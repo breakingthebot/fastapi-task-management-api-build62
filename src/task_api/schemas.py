@@ -1,14 +1,49 @@
 # src/task_api/schemas.py
-# Pydantic schemas for data validation, serialization, and OpenAPI documentation.
-# Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py
+# Pydantic schemas for User authentication, Task validation, and OpenAPI documentation.
+# Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from task_api.models import TaskStatus, TaskPriority
 
 
+# User Schemas
+class UserBase(BaseModel):
+    """Base fields shared by User schemas."""
+    email: EmailStr = Field(..., description="User email address", json_schema_extra={"example": "user@example.com"})
+    full_name: Optional[str] = Field(None, max_length=255, json_schema_extra={"example": "Jane Doe"})
+
+
+class UserCreate(UserBase):
+    """Schema for registering a new user account."""
+    password: str = Field(..., min_length=8, max_length=128, description="Account password (min 8 characters)", json_schema_extra={"example": "SecurePass123!"})
+
+
+class UserResponse(UserBase):
+    """Schema for returning user account details."""
+    id: int
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Authentication Token Schemas
+class Token(BaseModel):
+    """Bearer JWT response schema."""
+    access_token: str
+    token_type: str = "bearer"
+
+
+class TokenData(BaseModel):
+    """Decoded JWT payload structure."""
+    user_id: Optional[int] = None
+    email: Optional[str] = None
+
+
+# Task Schemas
 class TaskBase(BaseModel):
     """Base fields shared by Task inputs and outputs."""
     title: str = Field(..., min_length=1, max_length=255, description="Task title", json_schema_extra={"example": "Implement OAuth2 Auth"})
@@ -35,6 +70,7 @@ class TaskUpdate(BaseModel):
 class TaskResponse(TaskBase):
     """Schema for returning task details in API responses."""
     id: int
+    owner_id: int
     created_at: datetime
     updated_at: datetime
 

@@ -1,12 +1,13 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing complete task management lifecycle features, CRUD operations, background tasks, authentication, and file attachments with interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, background tasks, and file attachments with interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
 - **Framework**: FastAPI, Uvicorn
 - **Database**: SQLite (SQLAlchemy 2.0 ORM)
-- **Validation**: Pydantic v2
+- **Security & Authentication**: JWT (python-jose), bcrypt password hashing
+- **Validation**: Pydantic v2 (with email-validator)
 - **Testing**: pytest, HTTPX TestClient
 
 ## Setup
@@ -38,7 +39,9 @@ cp .env.example .env
 Key configuration variables:
 - `APP_NAME`: Application display name
 - `APP_ENV`: Environment identifier (`development` / `production`)
-- `SECRET_KEY`: Secret key used for cryptographic operations
+- `SECRET_KEY`: Secret key used for cryptographic operations and JWT signing
+- `ALGORITHM`: JWT signing algorithm (default `HS256`)
+- `ACCESS_TOKEN_EXPIRE_MINUTES`: JWT token validity duration in minutes (default `30`)
 - `DATABASE_URL`: SQLAlchemy database connection string (`sqlite:///./task_management.db`)
 - `UPLOAD_DIR`: Target path for file uploads
 - `MAX_UPLOAD_SIZE_BYTES`: Maximum allowed file upload size in bytes
@@ -63,21 +66,34 @@ Run the automated test suite with pytest:
 pytest -v
 ```
 
+## Authentication & API Usage
+1. **Register Account**: `POST /auth/register` with JSON body:
+   ```json
+   {
+     "email": "user@example.com",
+     "password": "SecurePassword123!",
+     "full_name": "Jane Doe"
+   }
+   ```
+2. **Login & Obtain Token**: `POST /auth/login` (Form data: `username` and `password`). Returns JWT access token.
+3. **Authenticated Task Operations**: Pass header `Authorization: Bearer <access_token>` to all protected `/tasks` endpoints.
+
 ## Architecture Notes
 The application is structured into atomic Python modules under `src/task_api/`:
 - `config.py`: Environment configuration via Pydantic BaseSettings.
+- `auth.py`: Bcrypt password hashing, JWT encoding/decoding, and `get_current_user` FastAPI dependency.
 - `database.py`: SQLAlchemy session engine and database dependency injection (`get_db`).
-- `models.py`: Database ORM models representing tasks with status and priority enums.
-- `schemas.py`: Pydantic input/output schemas ensuring strict request validation and response serialization.
-- `crud.py`: Encapsulated database operations keeping route handlers lean.
-- `main.py`: Main FastAPI router and middleware initialization.
+- `models.py`: Database ORM models (`UserModel`, `TaskModel`) establishing foreign key relationships and tenant isolation.
+- `schemas.py`: Pydantic input/output schemas ensuring request validation (`UserCreate`, `TaskCreate`) and response serialization.
+- `crud.py`: Encapsulated database queries filtering task data by authenticated `owner_id`.
+- `main.py`: FastAPI router handling authentication routes (`/auth`) and protected task endpoints (`/tasks`).
 - `cli.py`: Command Line Interface entry point supporting `--version` and `run` commands.
 
 ## Data Handling
-- **Data Collected**: Task details (title, description, status, priority, due date).
-- **Storage**: Retained locally in SQLite database instance specified by `DATABASE_URL`. No external tracking or user analytics stored.
-- **Sharing**: Zero third-party data sharing. Data remains isolated to the local runtime environment.
+- **Data Collected**: User profile data (email, full name, hashed password), task attributes (title, description, status, priority, due date).
+- **Storage**: Retained locally in SQLite database instance specified by `DATABASE_URL`. Passwords are irreversibly hashed using bcrypt. Zero plaintext password storage.
+- **Sharing**: Zero third-party data sharing. Data remains strictly isolated per user account.
 
 ## Notes
-- Built using clean layered architecture separating data models, Pydantic schemas, CRUD operations, and HTTP routing.
+- Enforces strict tenant isolation: users can only access or mutate tasks that belong to their account.
 - In-memory SQLite with `StaticPool` is configured for automated testing to ensure database state isolation per test function.

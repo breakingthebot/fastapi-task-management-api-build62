@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-02
+
+### Added
+- User authentication framework with bcrypt password hashing and JWT token issuance.
+- New database model `UserModel` and foreign key `owner_id` relationship on `TaskModel`.
+- User registration endpoint `POST /auth/register` and duplicate email validation.
+- Login endpoint `POST /auth/login` returning Bearer JWT access tokens.
+- Profile endpoint `GET /auth/me` returning current user details.
+- `get_current_user` dependency enforcing JWT token validation across all `/tasks` endpoints.
+- Strict multi-tenant user isolation (users only access their own tasks).
+- Unit & integration tests for authentication (`tests/test_auth.py`) and tenant isolation (`tests/test_tasks.py`).
+- Dependency updates: added `email-validator` for Pydantic `EmailStr` field validation.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added
