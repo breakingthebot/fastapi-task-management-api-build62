@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-02
+
+### Added
+- Team Workspaces & Role-Based Access Control (RBAC) system.
+- Database models `WorkspaceModel` and `WorkspaceMemberModel` with `WorkspaceRole` enum (`admin`, `editor`, `viewer`).
+- Added optional `workspace_id` foreign key on `TaskModel` to support team task sharing.
+- Workspace creation endpoint `POST /workspaces` (creator automatically assigned `admin` role) and workspace listing endpoint `GET /workspaces`.
+- Workspace member management endpoints `POST /workspaces/{id}/members` and `DELETE /workspaces/{id}/members/{user_id}` (restricted to workspace `admin` role).
+- Fine-grained RBAC enforcement on workspace task actions (`admin` full access, `editor` create/update, `viewer` read-only).
+- RBAC test suite in `tests/test_rbac.py` covering workspace creation, role assignments, member management restrictions, task sharing, and permission enforcement.
+
 ## [0.8.0] - 2026-08-02
 
 ### Added

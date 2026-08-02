@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining authentication, tasks, attachments, tags, webhooks, activity logs, caching, and background tasks.
+# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, RBAC, caching, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py
 # Created: 2026-08-02
 
@@ -8,21 +8,23 @@ import uuid
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from task_api import __version__
 from task_api.config import settings
 from task_api.database import engine, Base, get_db
-from task_api.models import TaskStatus, TaskPriority, UserModel
+from task_api.models import TaskStatus, TaskPriority, WorkspaceRole, UserModel
 from task_api.schemas import (
     UserCreate, UserResponse, Token,
     TaskCreate, TaskUpdate, TaskResponse, TaskListResponse,
     AttachmentResponse, AttachmentListResponse, TaskExportResponse,
     TagCreate, TagResponse, TagListResponse,
     WebhookCreate, WebhookResponse, WebhookListResponse,
-    ActivityLogResponse, ActivityLogListResponse
+    ActivityLogResponse, ActivityLogListResponse,
+    WorkspaceCreate, WorkspaceResponse, WorkspaceListResponse,
+    WorkspaceMemberAdd, WorkspaceMemberResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
@@ -39,7 +41,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, attachments, tags, webhooks, activity audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -102,6 +104,77 @@ def login_for_access_token(
 def get_current_user_profile(current_user: UserModel = Depends(get_current_user)):
     """Retrieve details for the currently authenticated user."""
     return current_user
+
+
+# Workspace & RBAC Endpoints
+@app.post("/workspaces", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED, tags=["Workspaces & RBAC"], summary="Create team workspace")
+def create_workspace_endpoint(
+    workspace_in: WorkspaceCreate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Create a new team workspace and assign ADMIN role to creator."""
+    return crud.create_workspace(db=db, workspace_in=workspace_in, owner_id=current_user.id)
+
+
+@app.get("/workspaces", response_model=WorkspaceListResponse, tags=["Workspaces & RBAC"], summary="List user workspaces")
+def list_workspaces_endpoint(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve all workspaces where the current user is a member."""
+    workspaces = crud.get_user_workspaces(db=db, user_id=current_user.id)
+    return WorkspaceListResponse(total=len(workspaces), workspaces=workspaces)
+
+
+@app.post("/workspaces/{workspace_id}/members", response_model=WorkspaceMemberResponse, status_code=status.HTTP_201_CREATED, tags=["Workspaces & RBAC"], summary="Add member to workspace (Admin Only)")
+def add_workspace_member_endpoint(
+    workspace_id: int,
+    member_in: WorkspaceMemberAdd,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Add a user to a workspace with an assigned RBAC role (Admin, Editor, Viewer)."""
+    role = crud.get_workspace_member_role(db=db, workspace_id=workspace_id, user_id=current_user.id)
+    if role != WorkspaceRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace Admins can manage members."
+        )
+
+    target_user = crud.get_user_by_email(db=db, email=member_in.user_email)
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with email '{member_in.user_email}' not found.")
+
+    member = crud.add_workspace_member(db=db, workspace_id=workspace_id, user_id=target_user.id, role=member_in.role)
+    return WorkspaceMemberResponse(
+        id=member.id,
+        workspace_id=member.workspace_id,
+        user_id=member.user_id,
+        user_email=target_user.email,
+        role=member.role,
+        joined_at=member.joined_at
+    )
+
+
+@app.delete("/workspaces/{workspace_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Workspaces & RBAC"], summary="Remove member from workspace (Admin Only)")
+def remove_workspace_member_endpoint(
+    workspace_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Remove a user membership from a workspace."""
+    role = crud.get_workspace_member_role(db=db, workspace_id=workspace_id, user_id=current_user.id)
+    if role != WorkspaceRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only workspace Admins can manage members.")
+
+    member = crud.get_workspace_member(db=db, workspace_id=workspace_id, user_id=user_id)
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User ID {user_id} is not a member of workspace {workspace_id}.")
+
+    crud.remove_workspace_member(db=db, member=member)
+    return None
 
 
 # Activity Audit Log Endpoints
@@ -201,13 +274,18 @@ def create_task_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Create a new task owned by the current authenticated user."""
-    db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
+    """Create a new task owned by user or in a workspace with Admin/Editor permission."""
+    if task_in.workspace_id:
+        role = crud.get_workspace_member_role(db=db, workspace_id=task_in.workspace_id, user_id=current_user.id)
+        if role not in (WorkspaceRole.ADMIN, WorkspaceRole.EDITOR):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Viewer role cannot create tasks in workspace."
+            )
 
-    # Invalidate cached task list entries for user
+    db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
     cache_service.invalidate_user_cache(current_user.id)
 
-    # Record activity log
     crud.create_activity_log(
         db=db,
         task_id=db_task.id,
@@ -242,7 +320,7 @@ def list_tasks_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Retrieve a paginated list of tasks owned by the current user with response caching."""
+    """Retrieve a paginated list of tasks owned by user or shared in workspaces with response caching."""
     cache_key = f"tasks:user:{current_user.id}:list:{skip}_{limit}_{status}_{priority}_{search}_{tag}"
     cached_payload = cache_service.get(cache_key)
 
@@ -274,7 +352,7 @@ def get_task_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Retrieve details for a specific task owned by the current user."""
+    """Retrieve details for a specific task owned by user or in shared workspace."""
     db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
     if not db_task:
         raise HTTPException(
@@ -292,13 +370,19 @@ def update_task_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Update fields of an existing task owned by the current user."""
+    """Update fields of an existing task (Requires Admin/Editor in workspace)."""
     db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
     if not db_task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task with ID {task_id} not found."
         )
+
+    # RBAC check for workspace tasks
+    if db_task.workspace_id and db_task.owner_id != current_user.id:
+        role = crud.get_workspace_member_role(db=db, workspace_id=db_task.workspace_id, user_id=current_user.id)
+        if role not in (WorkspaceRole.ADMIN, WorkspaceRole.EDITOR):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewer role cannot update workspace tasks.")
 
     update_dict = task_in.model_dump(exclude_unset=True)
     for field, new_val in update_dict.items():
@@ -315,8 +399,6 @@ def update_task_endpoint(
             )
 
     updated_task = crud.update_task(db=db, db_task=db_task, task_in=task_in)
-
-    # Invalidate cached task list entries
     cache_service.invalidate_user_cache(current_user.id)
 
     task_data = {"id": updated_task.id, "title": updated_task.title, "status": updated_task.status.value, "priority": updated_task.priority.value}
@@ -332,18 +414,22 @@ def delete_task_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Remove a task record owned by the current user."""
+    """Remove a task record (Requires Owner or Admin in workspace)."""
     db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
     if not db_task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task with ID {task_id} not found."
         )
+
+    if db_task.workspace_id and db_task.owner_id != current_user.id:
+        role = crud.get_workspace_member_role(db=db, workspace_id=db_task.workspace_id, user_id=current_user.id)
+        if role != WorkspaceRole.ADMIN:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Task Owner or Workspace Admin can delete workspace tasks.")
+
     deleted_id = db_task.id
     task_title = db_task.title
     crud.delete_task(db=db, db_task=db_task)
-
-    # Invalidate cached task list entries
     cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(
@@ -376,8 +462,6 @@ def attach_tag_to_task_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
 
     updated_task = crud.add_tag_to_task(db=db, db_task=db_task, db_tag=db_tag)
-
-    # Invalidate cache
     cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(
@@ -408,8 +492,6 @@ def remove_tag_from_task_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
 
     updated_task = crud.remove_tag_from_task(db=db, db_task=db_task, db_tag=db_tag)
-
-    # Invalidate cache
     cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(

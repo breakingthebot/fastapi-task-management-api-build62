@@ -1,12 +1,12 @@
 # src/task_api/schemas.py
-# Pydantic schemas for Users, Tasks, File Attachments, Tags, Webhooks, Activity Logs, Exports, and OpenAPI docs.
+# Pydantic schemas for Users, Tasks, File Attachments, Tags, Webhooks, Activity Logs, Workspaces, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl
-from task_api.models import TaskStatus, TaskPriority
+from task_api.models import TaskStatus, TaskPriority, WorkspaceRole
 
 
 # User Schemas
@@ -41,6 +41,52 @@ class TokenData(BaseModel):
     """Decoded JWT payload structure."""
     user_id: Optional[int] = None
     email: Optional[str] = None
+
+
+# Workspace & RBAC Schemas
+class WorkspaceBase(BaseModel):
+    """Base fields for team workspaces."""
+    name: str = Field(..., min_length=1, max_length=128, description="Workspace name", json_schema_extra={"example": "Engineering Team"})
+    description: Optional[str] = Field(None, max_length=2000, description="Workspace description", json_schema_extra={"example": "Backend development team workspace"})
+
+
+class WorkspaceCreate(WorkspaceBase):
+    """Schema for creating a workspace."""
+    pass
+
+
+class WorkspaceMemberAdd(BaseModel):
+    """Schema for adding a user to a workspace with an assigned RBAC role."""
+    user_email: EmailStr = Field(..., description="Email address of user to add")
+    role: WorkspaceRole = Field(default=WorkspaceRole.VIEWER, description="Assigned RBAC role (admin, editor, viewer)")
+
+
+class WorkspaceMemberResponse(BaseModel):
+    """Schema for returning workspace membership information."""
+    id: int
+    workspace_id: int
+    user_id: int
+    user_email: Optional[str] = None
+    role: WorkspaceRole
+    joined_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkspaceResponse(WorkspaceBase):
+    """Schema for returning workspace details."""
+    id: int
+    owner_id: int
+    created_at: datetime
+    members: List[WorkspaceMemberResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkspaceListResponse(BaseModel):
+    """Container for listing user workspaces."""
+    total: int
+    workspaces: List[WorkspaceResponse]
 
 
 # Tag Schemas
@@ -155,6 +201,7 @@ class TaskBase(BaseModel):
     status: TaskStatus = Field(default=TaskStatus.TODO, description="Task lifecycle status")
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM, description="Priority rating")
     due_date: Optional[datetime] = Field(None, description="Optional ISO timestamp due date")
+    workspace_id: Optional[int] = Field(None, description="Optional workspace ID linking task to team workspace")
 
 
 class TaskCreate(TaskBase):
@@ -175,6 +222,7 @@ class TaskResponse(TaskBase):
     """Schema for returning task details in API responses."""
     id: int
     owner_id: int
+    workspace_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     tags: List[TagResponse] = []

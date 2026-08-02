@@ -15,4 +15,4 @@ def test_cli_version_flag():
         text=True
     )
     assert result.returncode == 0
-    assert "task-api 0.8.0" in result.stdout.strip()
+    assert "task-api 0.9.0" in result.stdout.strip()

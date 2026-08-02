@@ -1,5 +1,5 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for User Accounts, Tasks, File Attachments, Tags, Webhooks, and Activity Logs.
+# SQLAlchemy ORM Data Models for Users, Tasks, File Attachments, Tags, Webhooks, Activity Logs, Workspaces, and RBAC Memberships.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -29,6 +29,12 @@ class TaskPriority(str, enum.Enum):
     URGENT = "urgent"
 
 
+class WorkspaceRole(str, enum.Enum):
+    ADMIN = "admin"
+    EDITOR = "editor"
+    VIEWER = "viewer"
+
+
 # Junction table for Many-to-Many relationship between Tasks and Tags
 task_tags = Table(
     "task_tags",
@@ -54,6 +60,35 @@ class UserModel(Base):
     tags = relationship("TagModel", back_populates="owner", cascade="all, delete-orphan")
     webhooks = relationship("WebhookModel", back_populates="owner", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLogModel", back_populates="owner", cascade="all, delete-orphan")
+    workspace_memberships = relationship("WorkspaceMemberModel", back_populates="user", cascade="all, delete-orphan")
+
+
+class WorkspaceModel(Base):
+    """SQLAlchemy Workspace model for team collaboration."""
+    __tablename__ = "workspaces"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(128), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    members = relationship("WorkspaceMemberModel", back_populates="workspace", cascade="all, delete-orphan")
+    tasks = relationship("TaskModel", back_populates="workspace", cascade="all, delete-orphan")
+
+
+class WorkspaceMemberModel(Base):
+    """SQLAlchemy WorkspaceMember model mapping user roles in team workspaces."""
+    __tablename__ = "workspace_members"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(Enum(WorkspaceRole), default=WorkspaceRole.VIEWER, nullable=False)
+    joined_at = Column(DateTime, default=utc_now, nullable=False)
+
+    workspace = relationship("WorkspaceModel", back_populates="members")
+    user = relationship("UserModel", back_populates="workspace_memberships")
 
 
 class TagModel(Base):
@@ -81,10 +116,12 @@ class TaskModel(Base):
     priority = Column(Enum(TaskPriority), default=TaskPriority.MEDIUM, nullable=False, index=True)
     due_date = Column(DateTime, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     owner = relationship("UserModel", back_populates="tasks")
+    workspace = relationship("WorkspaceModel", back_populates="tasks")
     attachments = relationship("AttachmentModel", back_populates="task", cascade="all, delete-orphan")
     tags = relationship("TagModel", secondary=task_tags, back_populates="tasks")
     activity_logs = relationship("ActivityLogModel", back_populates="task", cascade="all, delete-orphan")
