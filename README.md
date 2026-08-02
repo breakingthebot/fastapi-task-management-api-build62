@@ -1,6 +1,6 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment management, background tasks, and interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment uploads, background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
@@ -8,6 +8,7 @@ A production-ready FastAPI REST service providing user authentication (JWT + bcr
 - **Database**: SQLite (SQLAlchemy 2.0 ORM)
 - **Security & Authentication**: JWT (python-jose), bcrypt password hashing
 - **Validation**: Pydantic v2 (with email-validator)
+- **Async & Background**: FastAPI BackgroundTasks
 - **File Handling**: python-multipart, FileResponse
 - **Testing**: pytest, HTTPX TestClient
 
@@ -67,27 +68,18 @@ Run the automated test suite with pytest:
 pytest -v
 ```
 
-## Authentication & Attachment API Usage
-1. **Register Account**: `POST /auth/register`
-2. **Login & Obtain Token**: `POST /auth/login` (Returns Bearer JWT token).
-3. **Task Operations**: Pass header `Authorization: Bearer <access_token>` to protected `/tasks` endpoints.
-4. **Upload Task Attachment**:
+## API Usage & Background Tasks
+1. **Register & Login**: `POST /auth/register` & `POST /auth/login` to obtain a Bearer JWT access token.
+2. **Task Creation & Urgent Alerts**: Creating a task with priority `high` or `urgent` automatically triggers a non-blocking background notification log.
+3. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
+4. **Trigger Background CSV Export**:
    ```bash
-   curl -X POST "http://127.0.0.1:8000/tasks/1/attachments" \
-     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-     -F "file=@document.pdf"
+   curl -X POST "http://127.0.0.1:8000/tasks/export" -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
    ```
-5. **List Task Attachments**:
+   *Response*: Returns status `202 Accepted` and target export `filename`.
+5. **Download Exported CSV**:
    ```bash
-   curl http://127.0.0.1:8000/tasks/1/attachments -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-   ```
-6. **Download Attachment**:
-   ```bash
-   curl http://127.0.0.1:8000/attachments/1/download -H "Authorization: Bearer YOUR_ACCESS_TOKEN" --output downloaded.pdf
-   ```
-7. **Delete Attachment**:
-   ```bash
-   curl -X DELETE http://127.0.0.1:8000/attachments/1 -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+   curl "http://127.0.0.1:8000/exports/export_user_1_abc123.csv/download" -H "Authorization: Bearer YOUR_ACCESS_TOKEN" --output tasks_export.csv
    ```
 
 ## Architecture Notes
@@ -95,17 +87,18 @@ The application is structured into atomic Python modules under `src/task_api/`:
 - `config.py`: Environment configuration via Pydantic BaseSettings.
 - `auth.py`: Bcrypt password hashing, JWT encoding/decoding, and `get_current_user` FastAPI dependency.
 - `database.py`: SQLAlchemy session engine and database dependency injection (`get_db`).
-- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`) establishing relationships and tenant isolation.
-- `schemas.py`: Pydantic input/output schemas for Users, Tasks, and Attachment metadata responses.
-- `crud.py`: Encapsulated database queries filtering tasks and attachments by authenticated `owner_id`.
-- `main.py`: Main FastAPI router declaring authentication, protected tasks, and file attachment handling.
+- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`).
+- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Attachments, and Background Export responses.
+- `crud.py`: Encapsulated database queries filtering data by authenticated `owner_id`.
+- `services.py`: Background processing routines for non-blocking email alerts and CSV file generation.
+- `main.py`: FastAPI application router mounting all REST endpoints and BackgroundTasks dependencies.
 - `cli.py`: Command Line Interface entry point supporting `--version` and `run` commands.
 
 ## Data Handling
-- **Data Collected**: User credentials, task details, file attachment metadata, and binary file content.
-- **Storage**: Retained locally in SQLite database instance specified by `DATABASE_URL` and disk directory specified by `UPLOAD_DIR`.
-- **Sharing**: Zero third-party data sharing. Attachments are strictly isolated to the uploading user account.
+- **Data Collected**: User credentials, task details, file attachments, and exported CSV data files.
+- **Storage**: Retained locally in SQLite database (`DATABASE_URL`) and disk storage directories (`./uploads`, `./uploads/exports`).
+- **Sharing**: Zero third-party data sharing. Export files and attachments are strictly isolated to the owning user account.
 
 ## Notes
-- Enforces user tenant isolation on attachments: users can only list, download, or delete attachments belonging to their own tasks.
-- Uploaded files are stored with unique UUID filenames to prevent path traversal vulnerabilities and filename collisions.
+- Non-blocking execution: Background tasks offload email alerts and CSV file generation outside the HTTP request loop.
+- Path traversal protection: Export download routes sanitize file basenames and enforce `export_user_{id}_` prefixes.

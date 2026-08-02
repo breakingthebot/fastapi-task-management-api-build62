@@ -1,13 +1,13 @@
 # src/task_api/main.py
-# FastAPI application entry point defining authentication, protected task management, and file attachment endpoints.
-# Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
+# FastAPI application entry point defining authentication, protected tasks, file attachments, and background task execution.
+# Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py
 # Created: 2026-08-02
 
 import os
 import uuid
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, status
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -19,20 +19,23 @@ from task_api.models import TaskStatus, TaskPriority, UserModel
 from task_api.schemas import (
     UserCreate, UserResponse, Token,
     TaskCreate, TaskUpdate, TaskResponse, TaskListResponse,
-    AttachmentResponse, AttachmentListResponse
+    AttachmentResponse, AttachmentListResponse, TaskExportResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
+from task_api.services import send_urgent_task_notification, generate_task_csv_export
 
 # Create database tables automatically on startup
 Base.metadata.create_all(bind=engine)
 
-# Ensure upload directory exists
+# Ensure upload & export directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+EXPORT_DIR = os.path.join(settings.UPLOAD_DIR, "exports")
+os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT authentication, task CRUD operations, and file attachments.",
+    description="A robust FastAPI REST service providing JWT authentication, task CRUD, file attachments, and background task processing.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -101,11 +104,23 @@ def get_current_user_profile(current_user: UserModel = Depends(get_current_user)
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"], summary="Create a new task")
 def create_task_endpoint(
     task_in: TaskCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Create a new task owned by the current authenticated user."""
-    return crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
+    """Create a new task owned by the current authenticated user. Enqueues background email alert for urgent/high priority tasks."""
+    db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
+
+    # Trigger background notification if task is HIGH or URGENT
+    if db_task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
+        background_tasks.add_task(
+            send_urgent_task_notification,
+            user_email=current_user.email,
+            task_title=db_task.title,
+            task_priority=db_task.priority.value
+        )
+
+    return db_task
 
 
 @app.get("/tasks", response_model=TaskListResponse, tags=["Tasks"], summary="List all tasks for current user")
@@ -213,16 +228,13 @@ def upload_attachment_endpoint(
             detail="Cannot upload an empty file."
         )
 
-    # Generate unique stored filename to prevent collisions and path traversal
     file_ext = Path(file.filename).suffix
     unique_name = f"{uuid.uuid4().hex}{file_ext}"
     stored_path = os.path.join(settings.UPLOAD_DIR, unique_name)
 
-    # Save file content to disk
     with open(stored_path, "wb") as f:
         f.write(file_bytes)
 
-    # Save database attachment record
     attachment = crud.create_attachment(
         db=db,
         task_id=task_id,
@@ -295,9 +307,79 @@ def delete_attachment_endpoint(
             detail=f"Attachment with ID {attachment_id} not found."
         )
 
-    # Remove file from disk if present
     if os.path.exists(attachment.file_path):
         os.remove(attachment.file_path)
 
     crud.delete_attachment(db=db, db_attachment=attachment)
     return None
+
+
+# Background Processing & Export Endpoints
+@app.post("/tasks/export", response_model=TaskExportResponse, status_code=status.HTTP_202_ACCEPTED, tags=["Background Tasks"], summary="Export user tasks to CSV (Background Task)")
+def export_tasks_background_endpoint(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Trigger an asynchronous background task to export all tasks owned by the current user into a CSV file."""
+    tasks, total = crud.get_tasks(db=db, owner_id=current_user.id, limit=1000)
+
+    # Convert task ORM models to dictionary list for export task
+    tasks_data = [
+        {
+            "id": t.id,
+            "title": t.title,
+            "description": t.description,
+            "status": t.status.value,
+            "priority": t.priority.value,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None
+        }
+        for t in tasks
+    ]
+
+    filename = f"export_user_{current_user.id}_{uuid.uuid4().hex[:8]}.csv"
+    export_filepath = os.path.join(EXPORT_DIR, filename)
+
+    # Queue non-blocking background job
+    background_tasks.add_task(
+        generate_task_csv_export,
+        export_filepath=export_filepath,
+        user_email=current_user.email,
+        tasks_data=tasks_data
+    )
+
+    return TaskExportResponse(
+        message="CSV export processing enqueued successfully in background.",
+        filename=filename,
+        total_exported=total
+    )
+
+
+@app.get("/exports/{filename}/download", tags=["Background Tasks"], summary="Download generated task export CSV")
+def download_export_file_endpoint(
+    filename: str,
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Download a generated task CSV export file."""
+    # Prevent path traversal attacks
+    safe_filename = Path(filename).name
+    if not safe_filename.startswith(f"export_user_{current_user.id}_"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Export file not found or unauthorized."
+        )
+
+    filepath = os.path.join(EXPORT_DIR, safe_filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Export file is still processing or does not exist."
+        )
+
+    return FileResponse(
+        path=filepath,
+        filename=safe_filename,
+        media_type="text/csv"
+    )

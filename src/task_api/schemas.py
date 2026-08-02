@@ -1,5 +1,5 @@
 # src/task_api/schemas.py
-# Pydantic schemas for User authentication, Task validation, File Attachments, and OpenAPI documentation.
+# Pydantic schemas for User authentication, Task validation, File Attachments, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -61,6 +61,14 @@ class AttachmentListResponse(BaseModel):
     """Container for listing attachments linked to a task."""
     total: int
     attachments: List[AttachmentResponse]
+
+
+# Background Export Schemas
+class TaskExportResponse(BaseModel):
+    """Schema for returning background task export trigger details."""
+    message: str
+    filename: str
+    total_exported: int
 
 
 # Task Schemas

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-02
+
+### Added
+- Background task execution framework using FastAPI `BackgroundTasks`.
+- Non-blocking urgent task notification dispatch service (`send_urgent_task_notification`).
+- Asynchronous CSV task export processing endpoint `POST /tasks/export` returning HTTP 202 Accepted.
+- Export file download endpoint `GET /exports/{filename}/download` with security checks.
+- Background services module `src/task_api/services.py` handling file generation and logging.
+- Background task test suite in `tests/test_background.py` covering urgent task triggers, CSV exports, and multi-tenant download isolation.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added
