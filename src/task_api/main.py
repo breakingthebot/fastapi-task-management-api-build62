@@ -1,14 +1,14 @@
 # src/task_api/main.py
-# FastAPI application entry point defining authentication, tasks, attachments, tags, webhooks, activity logs, and background tasks.
-# Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py
+# FastAPI application entry point defining authentication, tasks, attachments, tags, webhooks, activity logs, caching, and background tasks.
+# Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py
 # Created: 2026-08-02
 
 import os
 import uuid
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, status
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response, status
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from task_api.schemas import (
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
 from task_api.services import send_urgent_task_notification, generate_task_csv_export, dispatch_webhook_event
+from task_api.cache import cache_service
 
 # Create database tables automatically on startup
 Base.metadata.create_all(bind=engine)
@@ -38,7 +39,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, attachments, tags, webhooks, audit activity logs, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, attachments, tags, webhooks, activity audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -203,6 +204,9 @@ def create_task_endpoint(
     """Create a new task owned by the current authenticated user."""
     db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
 
+    # Invalidate cached task list entries for user
+    cache_service.invalidate_user_cache(current_user.id)
+
     # Record activity log
     crud.create_activity_log(
         db=db,
@@ -226,8 +230,9 @@ def create_task_endpoint(
     return db_task
 
 
-@app.get("/tasks", response_model=TaskListResponse, tags=["Tasks"], summary="List all tasks for current user")
+@app.get("/tasks", tags=["Tasks"], summary="List all tasks for current user (Cached)")
 def list_tasks_endpoint(
+    response: Response,
     skip: int = Query(0, ge=0, description="Offset for pagination"),
     limit: int = Query(50, ge=1, le=100, description="Page limit"),
     status: Optional[TaskStatus] = Query(None, description="Filter by task status"),
@@ -237,7 +242,14 @@ def list_tasks_endpoint(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Retrieve a paginated list of tasks owned by the current user."""
+    """Retrieve a paginated list of tasks owned by the current user with response caching."""
+    cache_key = f"tasks:user:{current_user.id}:list:{skip}_{limit}_{status}_{priority}_{search}_{tag}"
+    cached_payload = cache_service.get(cache_key)
+
+    if cached_payload is not None:
+        response.headers["X-Cache"] = "HIT"
+        return cached_payload
+
     tasks, total = crud.get_tasks(
         db=db,
         owner_id=current_user.id,
@@ -248,7 +260,12 @@ def list_tasks_endpoint(
         search=search,
         tag=tag
     )
-    return TaskListResponse(total=total, tasks=tasks)
+
+    res_data = TaskListResponse(total=total, tasks=tasks).model_dump(mode="json")
+    cache_service.set(cache_key, res_data, ttl_seconds=60)
+
+    response.headers["X-Cache"] = "MISS"
+    return res_data
 
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse, tags=["Tasks"], summary="Get task by ID")
@@ -283,7 +300,6 @@ def update_task_endpoint(
             detail=f"Task with ID {task_id} not found."
         )
 
-    # Capture field diff for activity logging
     update_dict = task_in.model_dump(exclude_unset=True)
     for field, new_val in update_dict.items():
         old_val = getattr(db_task, field)
@@ -299,6 +315,9 @@ def update_task_endpoint(
             )
 
     updated_task = crud.update_task(db=db, db_task=db_task, task_in=task_in)
+
+    # Invalidate cached task list entries
+    cache_service.invalidate_user_cache(current_user.id)
 
     task_data = {"id": updated_task.id, "title": updated_task.title, "status": updated_task.status.value, "priority": updated_task.priority.value}
     background_tasks.add_task(dispatch_webhook_event, "task.updated", task_data, current_user.id)
@@ -323,6 +342,9 @@ def delete_task_endpoint(
     deleted_id = db_task.id
     task_title = db_task.title
     crud.delete_task(db=db, db_task=db_task)
+
+    # Invalidate cached task list entries
+    cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(
         db=db,
@@ -355,6 +377,9 @@ def attach_tag_to_task_endpoint(
 
     updated_task = crud.add_tag_to_task(db=db, db_task=db_task, db_tag=db_tag)
 
+    # Invalidate cache
+    cache_service.invalidate_user_cache(current_user.id)
+
     crud.create_activity_log(
         db=db,
         task_id=task_id,
@@ -383,6 +408,9 @@ def remove_tag_from_task_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {tag_id} not found.")
 
     updated_task = crud.remove_tag_from_task(db=db, db_task=db_task, db_tag=db_tag)
+
+    # Invalidate cache
+    cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(
         db=db,

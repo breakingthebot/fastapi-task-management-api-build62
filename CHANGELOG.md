@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-02
+
+### Added
+- Response Caching & Performance Optimization system in `src/task_api/cache.py`.
+- Thread-safe `CacheService` with configurable TTL expiration and pattern-based user cache invalidation.
+- Response header `X-Cache` (`HIT` / `MISS`) indicating cached vs fresh database query responses on `GET /tasks`.
+- Automatic write-invalidation triggering on task creation (`POST /tasks`), updates (`PUT /tasks/{id}`), deletions (`DELETE /tasks/{id}`), and tag associations (`POST/DELETE /tasks/{id}/tags/{id}`).
+- Cache test suite in `tests/test_cache.py` covering cache HIT/MISS headers, write-invalidation on task mutations, and multi-tenant cache key isolation.
+
 ## [0.7.0] - 2026-08-02
 
 ### Added
