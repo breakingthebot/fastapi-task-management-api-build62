@@ -1,5 +1,5 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, and Workspace objects.
+# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, and Comment objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -8,9 +8,9 @@ from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from task_api.models import (
     UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, ActivityLogModel,
-    WorkspaceModel, WorkspaceMemberModel, WorkspaceRole, TaskStatus, TaskPriority
+    WorkspaceModel, WorkspaceMemberModel, CommentModel, WorkspaceRole, TaskStatus, TaskPriority
 )
-from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate, WebhookCreate, WorkspaceCreate
+from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate, WebhookCreate, WorkspaceCreate, CommentCreate
 from task_api.auth import get_password_hash
 
 
@@ -40,6 +40,36 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[UserModel]:
     return db.query(UserModel).filter(UserModel.id == user_id).first()
 
 
+# Comment CRUD Operations
+def create_comment(db: Session, task_id: int, author_id: int, comment_in: CommentCreate) -> CommentModel:
+    """Persist a new task comment."""
+    db_comment = CommentModel(
+        task_id=task_id,
+        author_id=author_id,
+        content=comment_in.content
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    return db_comment
+
+
+def get_task_comments(db: Session, task_id: int) -> List[CommentModel]:
+    """Retrieve all comments posted on a task."""
+    return db.query(CommentModel).filter(CommentModel.task_id == task_id).order_by(CommentModel.id.asc()).all()
+
+
+def get_comment_by_id(db: Session, comment_id: int) -> Optional[CommentModel]:
+    """Retrieve a comment by ID."""
+    return db.query(CommentModel).filter(CommentModel.id == comment_id).first()
+
+
+def delete_comment(db: Session, db_comment: CommentModel) -> None:
+    """Delete a comment."""
+    db.delete(db_comment)
+    db.commit()
+
+
 # Workspace & RBAC CRUD Operations
 def create_workspace(db: Session, workspace_in: WorkspaceCreate, owner_id: int) -> WorkspaceModel:
     """Create a new team workspace and automatically add owner as ADMIN."""
@@ -52,7 +82,6 @@ def create_workspace(db: Session, workspace_in: WorkspaceCreate, owner_id: int) 
     db.commit()
     db.refresh(db_workspace)
 
-    # Automatically grant ADMIN role to creator
     owner_member = WorkspaceMemberModel(
         workspace_id=db_workspace.id,
         user_id=owner_id,

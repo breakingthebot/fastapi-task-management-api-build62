@@ -1,5 +1,5 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for Users, Tasks, File Attachments, Tags, Webhooks, Activity Logs, Workspaces, and RBAC Memberships.
+# SQLAlchemy ORM Data Models for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, Workspaces, RBAC, and Comments.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -61,6 +61,7 @@ class UserModel(Base):
     webhooks = relationship("WebhookModel", back_populates="owner", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLogModel", back_populates="owner", cascade="all, delete-orphan")
     workspace_memberships = relationship("WorkspaceMemberModel", back_populates="user", cascade="all, delete-orphan")
+    comments = relationship("CommentModel", back_populates="author", cascade="all, delete-orphan")
 
 
 class WorkspaceModel(Base):
@@ -125,6 +126,7 @@ class TaskModel(Base):
     attachments = relationship("AttachmentModel", back_populates="task", cascade="all, delete-orphan")
     tags = relationship("TagModel", secondary=task_tags, back_populates="tasks")
     activity_logs = relationship("ActivityLogModel", back_populates="task", cascade="all, delete-orphan")
+    comments = relationship("CommentModel", back_populates="task", cascade="all, delete-orphan")
 
 
 class AttachmentModel(Base):
@@ -174,3 +176,18 @@ class ActivityLogModel(Base):
 
     task = relationship("TaskModel", back_populates="activity_logs")
     owner = relationship("UserModel", back_populates="activity_logs")
+
+
+class CommentModel(Base):
+    """SQLAlchemy Comment model storing discussion messages posted on tasks."""
+    __tablename__ = "comments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    task = relationship("TaskModel", back_populates="comments")
+    author = relationship("UserModel", back_populates="comments")

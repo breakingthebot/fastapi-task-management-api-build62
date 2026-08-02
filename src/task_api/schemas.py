@@ -1,5 +1,5 @@
 # src/task_api/schemas.py
-# Pydantic schemas for Users, Tasks, File Attachments, Tags, Webhooks, Activity Logs, Workspaces, Exports, and OpenAPI docs.
+# Pydantic schemas for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, Workspaces, Comments, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -87,6 +87,40 @@ class WorkspaceListResponse(BaseModel):
     """Container for listing user workspaces."""
     total: int
     workspaces: List[WorkspaceResponse]
+
+
+# Comment Schemas
+class CommentBase(BaseModel):
+    """Base fields for task comments."""
+    content: str = Field(..., min_length=1, max_length=5000, description="Markdown comment text content", json_schema_extra={"example": "I reviewed the PR and tests look solid."})
+
+
+class CommentCreate(CommentBase):
+    """Schema for posting a comment."""
+    pass
+
+
+class CommentUpdate(BaseModel):
+    """Schema for editing a comment."""
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class CommentResponse(CommentBase):
+    """Schema for returning comment details."""
+    id: int
+    task_id: int
+    author_id: int
+    author_email: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CommentListResponse(BaseModel):
+    """Container for listing task comments."""
+    total: int
+    comments: List[CommentResponse]
 
 
 # Tag Schemas

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-02
+
+### Added
+- Task Comments and Discussion Threads feature.
+- Database model `CommentModel` storing task comments, author ID, markdown content, and timestamps.
+- Post comment endpoint `POST /tasks/{task_id}/comments` and comment listing endpoint `GET /tasks/{task_id}/comments`.
+- Delete comment endpoint `DELETE /comments/{comment_id}` (restricted to comment author or workspace `admin`).
+- Activity audit logging trigger `comment.created` when comments are posted.
+- Comment test suite in `tests/test_comments.py` covering comment creation, thread listing, deletion, and security authorization checks.
+
 ## [0.9.0] - 2026-08-02
 
 ### Added

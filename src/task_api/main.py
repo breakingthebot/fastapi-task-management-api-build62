@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, RBAC, caching, and background tasks.
+# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, RBAC, caching, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py
 # Created: 2026-08-02
 
@@ -24,7 +24,8 @@ from task_api.schemas import (
     WebhookCreate, WebhookResponse, WebhookListResponse,
     ActivityLogResponse, ActivityLogListResponse,
     WorkspaceCreate, WorkspaceResponse, WorkspaceListResponse,
-    WorkspaceMemberAdd, WorkspaceMemberResponse
+    WorkspaceMemberAdd, WorkspaceMemberResponse,
+    CommentCreate, CommentResponse, CommentListResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
@@ -41,7 +42,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, attachments, tags, webhooks, audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, discussion comments, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -174,6 +175,97 @@ def remove_workspace_member_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User ID {user_id} is not a member of workspace {workspace_id}.")
 
     crud.remove_workspace_member(db=db, member=member)
+    return None
+
+
+# Comment Endpoints
+@app.post("/tasks/{task_id}/comments", response_model=CommentResponse, status_code=status.HTTP_201_CREATED, tags=["Comments"], summary="Post a comment on a task")
+def create_comment_endpoint(
+    task_id: int,
+    comment_in: CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Post a discussion comment on a task."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task with ID {task_id} not found.")
+
+    db_comment = crud.create_comment(db=db, task_id=task_id, author_id=current_user.id, comment_in=comment_in)
+
+    crud.create_activity_log(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        action="comment.created",
+        new_value=db_comment.content[:100]
+    )
+
+    return CommentResponse(
+        id=db_comment.id,
+        task_id=db_comment.task_id,
+        author_id=db_comment.author_id,
+        author_email=current_user.email,
+        content=db_comment.content,
+        created_at=db_comment.created_at,
+        updated_at=db_comment.updated_at
+    )
+
+
+@app.get("/tasks/{task_id}/comments", response_model=CommentListResponse, tags=["Comments"], summary="List task comments")
+def list_task_comments_endpoint(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """List all discussion comments posted on a task."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task with ID {task_id} not found.")
+
+    comments = crud.get_task_comments(db=db, task_id=task_id)
+    comment_responses = []
+    for c in comments:
+        author = crud.get_user_by_id(db=db, user_id=c.author_id)
+        comment_responses.append(CommentResponse(
+            id=c.id,
+            task_id=c.task_id,
+            author_id=c.author_id,
+            author_email=author.email if author else None,
+            content=c.content,
+            created_at=c.created_at,
+            updated_at=c.updated_at
+        ))
+
+    return CommentListResponse(total=len(comment_responses), comments=comment_responses)
+
+
+@app.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Comments"], summary="Delete comment by ID")
+def delete_comment_endpoint(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Delete a comment by ID (Author or Workspace Admin)."""
+    db_comment = crud.get_comment_by_id(db=db, comment_id=comment_id)
+    if not db_comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Comment with ID {comment_id} not found.")
+
+    db_task = crud.get_task_by_id(db=db, task_id=db_comment.task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+
+    # Access check: Author or Workspace Admin
+    is_author = (db_comment.author_id == current_user.id)
+    is_admin = False
+    if db_task.workspace_id:
+        role = crud.get_workspace_member_role(db=db, workspace_id=db_task.workspace_id, user_id=current_user.id)
+        is_admin = (role == WorkspaceRole.ADMIN)
+
+    if not (is_author or is_admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only comment author or workspace Admin can delete this comment.")
+
+    crud.delete_comment(db=db, db_comment=db_comment)
     return None
 
 
@@ -378,7 +470,6 @@ def update_task_endpoint(
             detail=f"Task with ID {task_id} not found."
         )
 
-    # RBAC check for workspace tasks
     if db_task.workspace_id and db_task.owner_id != current_user.id:
         role = crud.get_workspace_member_role(db=db, workspace_id=db_task.workspace_id, user_id=current_user.id)
         if role not in (WorkspaceRole.ADMIN, WorkspaceRole.EDITOR):
