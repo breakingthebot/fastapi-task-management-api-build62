@@ -1,9 +1,9 @@
 # src/task_api/schemas.py
-# Pydantic schemas for User authentication, Task validation, and OpenAPI documentation.
+# Pydantic schemas for User authentication, Task validation, File Attachments, and OpenAPI documentation.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from task_api.models import TaskStatus, TaskPriority
@@ -41,6 +41,26 @@ class TokenData(BaseModel):
     """Decoded JWT payload structure."""
     user_id: Optional[int] = None
     email: Optional[str] = None
+
+
+# Attachment Schemas
+class AttachmentResponse(BaseModel):
+    """Schema for returning file attachment metadata."""
+    id: int
+    task_id: int
+    owner_id: int
+    filename: str
+    content_type: str
+    file_size_bytes: int
+    uploaded_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AttachmentListResponse(BaseModel):
+    """Container for listing attachments linked to a task."""
+    total: int
+    attachments: List[AttachmentResponse]
 
 
 # Task Schemas

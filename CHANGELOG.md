@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-02
+
+### Added
+- Task File Attachment feature supporting document and image file uploads linked to tasks.
+- Database model `AttachmentModel` storing metadata (filename, stored filename, content type, size, upload timestamp).
+- Upload endpoint `POST /tasks/{task_id}/attachments` with multipart upload support, file size limits (`MAX_UPLOAD_SIZE_BYTES`), and UUID stored filename security.
+- List attachments endpoint `GET /tasks/{task_id}/attachments` returning attachment metadata.
+- Download endpoint `GET /attachments/{attachment_id}/download` streaming files via `FileResponse`.
+- Delete attachment endpoint `DELETE /attachments/{attachment_id}` with disk file cleanup.
+- Strict multi-tenant attachment isolation ensuring users can only download or delete their own attachments.
+- Attachment test suite in `tests/test_attachments.py` covering upload, listing, download, deletion, and security checks.
+
 ## [0.2.0] - 2026-08-02
 
 ### Added

@@ -1,11 +1,11 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User and Task objects.
+# Database interaction logic and queries for User, Task, and Attachment objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from task_api.models import UserModel, TaskModel, TaskStatus, TaskPriority
+from task_api.models import UserModel, TaskModel, AttachmentModel, TaskStatus, TaskPriority
 from task_api.schemas import UserCreate, TaskCreate, TaskUpdate
 from task_api.auth import get_password_hash
 
@@ -96,4 +96,53 @@ def update_task(db: Session, db_task: TaskModel, task_in: TaskUpdate) -> TaskMod
 def delete_task(db: Session, db_task: TaskModel) -> None:
     """Delete a task record from the database."""
     db.delete(db_task)
+    db.commit()
+
+
+# Attachment CRUD Operations
+def create_attachment(
+    db: Session,
+    task_id: int,
+    owner_id: int,
+    filename: str,
+    stored_filename: str,
+    file_path: str,
+    content_type: str,
+    file_size_bytes: int
+) -> AttachmentModel:
+    """Persist file attachment metadata in the database."""
+    db_attachment = AttachmentModel(
+        task_id=task_id,
+        owner_id=owner_id,
+        filename=filename,
+        stored_filename=stored_filename,
+        file_path=file_path,
+        content_type=content_type,
+        file_size_bytes=file_size_bytes
+    )
+    db.add(db_attachment)
+    db.commit()
+    db.refresh(db_attachment)
+    return db_attachment
+
+
+def get_attachments_by_task(db: Session, task_id: int, owner_id: int) -> List[AttachmentModel]:
+    """List all attachments linked to a task owned by owner_id."""
+    return db.query(AttachmentModel).filter(
+        AttachmentModel.task_id == task_id,
+        AttachmentModel.owner_id == owner_id
+    ).all()
+
+
+def get_attachment_by_id_and_owner(db: Session, attachment_id: int, owner_id: int) -> Optional[AttachmentModel]:
+    """Retrieve an attachment metadata record by ID owned by owner_id."""
+    return db.query(AttachmentModel).filter(
+        AttachmentModel.id == attachment_id,
+        AttachmentModel.owner_id == owner_id
+    ).first()
+
+
+def delete_attachment(db: Session, db_attachment: AttachmentModel) -> None:
+    """Remove attachment record from database."""
+    db.delete(db_attachment)
     db.commit()

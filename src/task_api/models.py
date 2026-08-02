@@ -1,5 +1,5 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for User Accounts and Task Management.
+# SQLAlchemy ORM Data Models for User Accounts, Tasks, and File Attachments.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -41,6 +41,7 @@ class UserModel(Base):
     created_at = Column(DateTime, default=utc_now, nullable=False)
 
     tasks = relationship("TaskModel", back_populates="owner", cascade="all, delete-orphan")
+    attachments = relationship("AttachmentModel", back_populates="owner", cascade="all, delete-orphan")
 
 
 class TaskModel(Base):
@@ -58,3 +59,22 @@ class TaskModel(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     owner = relationship("UserModel", back_populates="tasks")
+    attachments = relationship("AttachmentModel", back_populates="task", cascade="all, delete-orphan")
+
+
+class AttachmentModel(Base):
+    """SQLAlchemy Attachment model storing metadata for task file uploads."""
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    stored_filename = Column(String(255), nullable=False, unique=True)
+    file_path = Column(String(512), nullable=False)
+    content_type = Column(String(128), nullable=False)
+    file_size_bytes = Column(Integer, nullable=False)
+    uploaded_at = Column(DateTime, default=utc_now, nullable=False)
+
+    task = relationship("TaskModel", back_populates="attachments")
+    owner = relationship("UserModel", back_populates="attachments")

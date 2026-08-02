@@ -1,6 +1,6 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, background tasks, and file attachments with interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, file attachment management, background tasks, and interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
@@ -8,6 +8,7 @@ A production-ready FastAPI REST service providing user authentication (JWT + bcr
 - **Database**: SQLite (SQLAlchemy 2.0 ORM)
 - **Security & Authentication**: JWT (python-jose), bcrypt password hashing
 - **Validation**: Pydantic v2 (with email-validator)
+- **File Handling**: python-multipart, FileResponse
 - **Testing**: pytest, HTTPX TestClient
 
 ## Setup
@@ -43,8 +44,8 @@ Key configuration variables:
 - `ALGORITHM`: JWT signing algorithm (default `HS256`)
 - `ACCESS_TOKEN_EXPIRE_MINUTES`: JWT token validity duration in minutes (default `30`)
 - `DATABASE_URL`: SQLAlchemy database connection string (`sqlite:///./task_management.db`)
-- `UPLOAD_DIR`: Target path for file uploads
-- `MAX_UPLOAD_SIZE_BYTES`: Maximum allowed file upload size in bytes
+- `UPLOAD_DIR`: Target directory path for file attachments (`./uploads`)
+- `MAX_UPLOAD_SIZE_BYTES`: Maximum allowed file attachment upload size in bytes (`5242880` / 5MB)
 
 ## Running Locally
 Start the server using the installable CLI entry point:
@@ -66,34 +67,45 @@ Run the automated test suite with pytest:
 pytest -v
 ```
 
-## Authentication & API Usage
-1. **Register Account**: `POST /auth/register` with JSON body:
-   ```json
-   {
-     "email": "user@example.com",
-     "password": "SecurePassword123!",
-     "full_name": "Jane Doe"
-   }
+## Authentication & Attachment API Usage
+1. **Register Account**: `POST /auth/register`
+2. **Login & Obtain Token**: `POST /auth/login` (Returns Bearer JWT token).
+3. **Task Operations**: Pass header `Authorization: Bearer <access_token>` to protected `/tasks` endpoints.
+4. **Upload Task Attachment**:
+   ```bash
+   curl -X POST "http://127.0.0.1:8000/tasks/1/attachments" \
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     -F "file=@document.pdf"
    ```
-2. **Login & Obtain Token**: `POST /auth/login` (Form data: `username` and `password`). Returns JWT access token.
-3. **Authenticated Task Operations**: Pass header `Authorization: Bearer <access_token>` to all protected `/tasks` endpoints.
+5. **List Task Attachments**:
+   ```bash
+   curl http://127.0.0.1:8000/tasks/1/attachments -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+   ```
+6. **Download Attachment**:
+   ```bash
+   curl http://127.0.0.1:8000/attachments/1/download -H "Authorization: Bearer YOUR_ACCESS_TOKEN" --output downloaded.pdf
+   ```
+7. **Delete Attachment**:
+   ```bash
+   curl -X DELETE http://127.0.0.1:8000/attachments/1 -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+   ```
 
 ## Architecture Notes
 The application is structured into atomic Python modules under `src/task_api/`:
 - `config.py`: Environment configuration via Pydantic BaseSettings.
 - `auth.py`: Bcrypt password hashing, JWT encoding/decoding, and `get_current_user` FastAPI dependency.
 - `database.py`: SQLAlchemy session engine and database dependency injection (`get_db`).
-- `models.py`: Database ORM models (`UserModel`, `TaskModel`) establishing foreign key relationships and tenant isolation.
-- `schemas.py`: Pydantic input/output schemas ensuring request validation (`UserCreate`, `TaskCreate`) and response serialization.
-- `crud.py`: Encapsulated database queries filtering task data by authenticated `owner_id`.
-- `main.py`: FastAPI router handling authentication routes (`/auth`) and protected task endpoints (`/tasks`).
+- `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`) establishing relationships and tenant isolation.
+- `schemas.py`: Pydantic input/output schemas for Users, Tasks, and Attachment metadata responses.
+- `crud.py`: Encapsulated database queries filtering tasks and attachments by authenticated `owner_id`.
+- `main.py`: Main FastAPI router declaring authentication, protected tasks, and file attachment handling.
 - `cli.py`: Command Line Interface entry point supporting `--version` and `run` commands.
 
 ## Data Handling
-- **Data Collected**: User profile data (email, full name, hashed password), task attributes (title, description, status, priority, due date).
-- **Storage**: Retained locally in SQLite database instance specified by `DATABASE_URL`. Passwords are irreversibly hashed using bcrypt. Zero plaintext password storage.
-- **Sharing**: Zero third-party data sharing. Data remains strictly isolated per user account.
+- **Data Collected**: User credentials, task details, file attachment metadata, and binary file content.
+- **Storage**: Retained locally in SQLite database instance specified by `DATABASE_URL` and disk directory specified by `UPLOAD_DIR`.
+- **Sharing**: Zero third-party data sharing. Attachments are strictly isolated to the uploading user account.
 
 ## Notes
-- Enforces strict tenant isolation: users can only access or mutate tasks that belong to their account.
-- In-memory SQLite with `StaticPool` is configured for automated testing to ensure database state isolation per test function.
+- Enforces user tenant isolation on attachments: users can only list, download, or delete attachments belonging to their own tasks.
+- Uploaded files are stored with unique UUID filenames to prevent path traversal vulnerabilities and filename collisions.
