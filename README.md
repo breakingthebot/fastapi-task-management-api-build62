@@ -1,6 +1,6 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, team workspaces & RBAC role-based access control (Admin, Editor, Viewer), rate limiting & sliding-window throttling (HTTP 429), task comments & discussion threads, file attachment uploads, task tagging & multi-category labeling, webhooks & real-time event subscriptions (HMAC-SHA256 signed), task activity audit trail logging, response caching & performance optimization (write-invalidation), background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, team workspaces & RBAC role-based access control (Admin, Editor, Viewer), task analytics dashboard statistics, rate limiting & sliding-window throttling (HTTP 429), task comments & discussion threads, file attachment uploads, task tagging & multi-category labeling, webhooks & real-time event subscriptions (HMAC-SHA256 signed), task activity audit trail logging, response caching & performance optimization (write-invalidation), background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
@@ -71,17 +71,16 @@ pytest -v
 
 ## API Usage & Features
 1. **Register & Login**: `POST /auth/register` & `POST /auth/login` to obtain a Bearer JWT access token.
-2. **Rate Limiting & Throttling**:
-   - `POST /auth/login` is rate limited to 5 requests per 60 seconds per IP address. Exceeding limits returns `HTTP 429 Too Many Requests` with a `Retry-After` header.
-   - General API routes are throttled via sliding-window counter logic.
-3. **Task Comments & Discussion Threads**: `POST /tasks/{task_id}/comments`, `GET /tasks/{task_id}/comments`, `DELETE /comments/{comment_id}`.
-4. **Team Workspaces & RBAC**: `POST /workspaces`, `GET /workspaces`, `POST /workspaces/{id}/members` (Admin, Editor, Viewer roles).
-5. **Response Caching**: `GET /tasks` responses are cached per user with `X-Cache: HIT`/`MISS` headers and write-invalidation.
-6. **Task Activity Audit Trail**: `GET /tasks/{task_id}/activity` & `GET /activity` returning revision entries and field diffs.
-7. **Webhooks**: `POST /webhooks`, `GET /webhooks`, `DELETE /webhooks/{webhook_id}` with HMAC-SHA256 signature headers.
-8. **Category Tagging**: `POST /tags`, `GET /tags`, `POST /tasks/{task_id}/tags/{tag_id}`, `DELETE /tasks/{task_id}/tags/{tag_id}`, `GET /tasks?tag=Work`.
-9. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
-10. **Background CSV Export & Priority Alerts**: `POST /tasks/export` and `GET /exports/{filename}/download`.
+2. **Task Analytics & Dashboard Metrics**: `GET /analytics/tasks` returning aggregated task totals, completion rate %, priority breakdown, status counts, attachment totals, and discussion comment metrics.
+3. **Rate Limiting & Throttling**: Sliding-window counter protecting `/auth/login` (5 req/min) and general endpoints with `HTTP 429` and `Retry-After` headers.
+4. **Task Comments & Discussion Threads**: `POST /tasks/{task_id}/comments`, `GET /tasks/{task_id}/comments`, `DELETE /comments/{comment_id}`.
+5. **Team Workspaces & RBAC**: `POST /workspaces`, `GET /workspaces`, `POST /workspaces/{id}/members` (Admin, Editor, Viewer roles).
+6. **Response Caching**: `GET /tasks` responses are cached per user with `X-Cache: HIT`/`MISS` headers and write-invalidation.
+7. **Task Activity Audit Trail**: `GET /tasks/{task_id}/activity` & `GET /activity` returning revision entries and field diffs.
+8. **Webhooks**: `POST /webhooks`, `GET /webhooks`, `DELETE /webhooks/{webhook_id}` with HMAC-SHA256 signature headers.
+9. **Category Tagging**: `POST /tags`, `GET /tags`, `POST /tasks/{task_id}/tags/{tag_id}`, `DELETE /tasks/{task_id}/tags/{tag_id}`, `GET /tasks?tag=Work`.
+10. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
+11. **Background CSV Export & Priority Alerts**: `POST /tasks/export` and `GET /exports/{filename}/download`.
 
 ## Architecture Notes
 The application is structured into atomic Python modules under `src/task_api/`:
@@ -91,7 +90,7 @@ The application is structured into atomic Python modules under `src/task_api/`:
 - `rate_limiter.py`: Thread-safe sliding-window rate limiter class (`RateLimiter`).
 - `cache.py`: High-performance thread-safe caching service (`CacheService`) with pattern invalidation.
 - `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`, `TagModel`, `WebhookModel`, `ActivityLogModel`, `WorkspaceModel`, `WorkspaceMemberModel`, `CommentModel`).
-- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Workspaces, Members, Comments, Attachments, Tags, Webhooks, Activity Logs, and Export responses.
+- `schemas.py`: Pydantic input/output schemas for Users, Tasks, Workspaces, Members, Comments, Attachments, Tags, Webhooks, Activity Logs, Analytics, and Export responses.
 - `crud.py`: Encapsulated database queries filtering data by authenticated `owner_id` and workspace membership.
 - `services.py`: Background processing routines for non-blocking email alerts, CSV file generation, and HMAC-SHA256 webhook event dispatches.
 - `main.py`: FastAPI application router mounting all REST endpoints, rate limit middleware, RBAC middleware, caching, and BackgroundTasks dependencies.
@@ -100,7 +99,7 @@ The application is structured into atomic Python modules under `src/task_api/`:
 ## Data Handling
 - **Data Collected**: User credentials, workspace details, team member roles, task details, discussion comments, category tags, file attachments, webhook URLs/secrets, activity audit logs, and exported CSV data files.
 - **Storage**: Retained locally in SQLite database (`DATABASE_URL`), in-memory cache, and disk storage directories (`./uploads`, `./uploads/exports`).
-- **Sharing**: Zero third-party data sharing. Rate limits are computed locally per client IP address.
+- **Sharing**: Zero third-party data sharing. Analytics are calculated strictly for the authenticated user and their shared team workspaces.
 
 ## Notes
-- Rate Limiter: Enforces sliding-window request counting in-memory with automatic expiration and standard HTTP 429 `Retry-After` headers.
+- Task Analytics: Dynamically calculates completion percentages and status/priority distributions via SQL aggregation.

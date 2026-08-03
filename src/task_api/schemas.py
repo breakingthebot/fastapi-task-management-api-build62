@@ -1,9 +1,9 @@
 # src/task_api/schemas.py
-# Pydantic schemas for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, Workspaces, Comments, Exports, and OpenAPI docs.
+# Pydantic schemas for Users, Tasks, Workspaces, Comments, Attachments, Tags, Webhooks, Activity Logs, Analytics, Exports, and OpenAPI docs.
 # Connects to: src/task_api/models.py, src/task_api/main.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl
 from task_api.models import TaskStatus, TaskPriority, WorkspaceRole
@@ -41,6 +41,19 @@ class TokenData(BaseModel):
     """Decoded JWT payload structure."""
     user_id: Optional[int] = None
     email: Optional[str] = None
+
+
+# Analytics Schemas
+class TaskAnalyticsResponse(BaseModel):
+    """Schema for task analytics and productivity dashboard metrics."""
+    total_tasks: int
+    completed_tasks: int
+    pending_tasks: int
+    completion_rate: float
+    tasks_by_priority: Dict[str, int]
+    tasks_by_status: Dict[str, int]
+    total_attachments: int
+    total_comments: int
 
 
 # Workspace & RBAC Schemas

@@ -1,17 +1,64 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, and Comment objects.
+# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, and Analytics objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 import secrets
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from task_api.models import (
     UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, ActivityLogModel,
     WorkspaceModel, WorkspaceMemberModel, CommentModel, WorkspaceRole, TaskStatus, TaskPriority
 )
 from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate, WebhookCreate, WorkspaceCreate, CommentCreate
 from task_api.auth import get_password_hash
+
+
+# Analytics CRUD Operations
+def get_task_analytics(db: Session, owner_id: int) -> Dict:
+    """Compute aggregated dashboard analytics and productivity metrics for a user."""
+    user_workspace_ids = [w.id for w in get_user_workspaces(db=db, user_id=owner_id)]
+
+    base_query = db.query(TaskModel).filter(
+        (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
+    )
+
+    total_tasks = base_query.count()
+    completed_tasks = base_query.filter(TaskModel.status == TaskStatus.COMPLETED).count()
+    pending_tasks = total_tasks - completed_tasks
+    completion_rate = round((completed_tasks / total_tasks * 100.0), 2) if total_tasks > 0 else 0.0
+
+    # Tasks by priority
+    priority_counts = {p.value: 0 for p in TaskPriority}
+    priority_results = db.query(TaskModel.priority, func.count(TaskModel.id)).filter(
+        (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
+    ).group_by(TaskModel.priority).all()
+    for priority_enum, count in priority_results:
+        priority_counts[priority_enum.value] = count
+
+    # Tasks by status
+    status_counts = {s.value: 0 for s in TaskStatus}
+    status_results = db.query(TaskModel.status, func.count(TaskModel.id)).filter(
+        (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
+    ).group_by(TaskModel.status).all()
+    for status_enum, count in status_results:
+        status_counts[status_enum.value] = count
+
+    # Attachments & Comments counts
+    total_attachments = db.query(AttachmentModel).filter(AttachmentModel.owner_id == owner_id).count()
+    total_comments = db.query(CommentModel).filter(CommentModel.author_id == owner_id).count()
+
+    return {
+        "total_tasks": total_tasks,
+        "completed_tasks": completed_tasks,
+        "pending_tasks": pending_tasks,
+        "completion_rate": completion_rate,
+        "tasks_by_priority": priority_counts,
+        "tasks_by_status": status_counts,
+        "total_attachments": total_attachments,
+        "total_comments": total_comments
+    }
 
 
 # User CRUD Operations

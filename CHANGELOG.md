@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-02
+
+### Added
+- Task Analytics and Dashboard Statistics system.
+- Endpoint `GET /analytics/tasks` returning productivity metrics (`total_tasks`, `completed_tasks`, `pending_tasks`, `completion_rate`, `tasks_by_priority`, `tasks_by_status`, `total_attachments`, `total_comments`).
+- Analytical SQL query function `get_task_analytics` in `src/task_api/crud.py` with multi-tenant and workspace scoping.
+- Analytics response schema `TaskAnalyticsResponse` in `src/task_api/schemas.py`.
+- Analytics test suite in `tests/test_analytics.py` validating task counts, completion rate calculations, and priority distributions.
+
 ## [0.11.0] - 2026-08-02
 
 ### Added

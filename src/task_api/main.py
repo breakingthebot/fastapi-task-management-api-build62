@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, RBAC, rate limiting, caching, and background tasks.
+# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, rate limiting, caching, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py, src/task_api/rate_limiter.py
 # Created: 2026-08-02
 
@@ -25,7 +25,8 @@ from task_api.schemas import (
     ActivityLogResponse, ActivityLogListResponse,
     WorkspaceCreate, WorkspaceResponse, WorkspaceListResponse,
     WorkspaceMemberAdd, WorkspaceMemberResponse,
-    CommentCreate, CommentResponse, CommentListResponse
+    CommentCreate, CommentResponse, CommentListResponse,
+    TaskAnalyticsResponse
 )
 from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
@@ -43,7 +44,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, analytics dashboard, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -96,6 +97,17 @@ def health_check():
 def version_endpoint():
     """Return current API version string."""
     return {"version": __version__}
+
+
+# Analytics Endpoint
+@app.get("/analytics/tasks", response_model=TaskAnalyticsResponse, tags=["Analytics"], summary="Get task analytics and productivity dashboard metrics")
+def get_task_analytics_endpoint(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve aggregated task counts, completion rates, priority distributions, and activity statistics."""
+    analytics = crud.get_task_analytics(db=db, owner_id=current_user.id)
+    return TaskAnalyticsResponse(**analytics)
 
 
 # Authentication Endpoints
