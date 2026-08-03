@@ -1,5 +1,5 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, and Analytics objects.
+# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, Analytics, and Soft Delete objects.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from task_api.models import (
     UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, ActivityLogModel,
-    WorkspaceModel, WorkspaceMemberModel, CommentModel, WorkspaceRole, TaskStatus, TaskPriority
+    WorkspaceModel, WorkspaceMemberModel, CommentModel, WorkspaceRole, TaskStatus, TaskPriority, utc_now
 )
 from task_api.schemas import UserCreate, TaskCreate, TaskUpdate, TagCreate, WebhookCreate, WorkspaceCreate, CommentCreate
 from task_api.auth import get_password_hash
@@ -21,6 +21,7 @@ def get_task_analytics(db: Session, owner_id: int) -> Dict:
     user_workspace_ids = [w.id for w in get_user_workspaces(db=db, user_id=owner_id)]
 
     base_query = db.query(TaskModel).filter(
+        TaskModel.is_deleted == False,
         (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
     )
 
@@ -29,23 +30,22 @@ def get_task_analytics(db: Session, owner_id: int) -> Dict:
     pending_tasks = total_tasks - completed_tasks
     completion_rate = round((completed_tasks / total_tasks * 100.0), 2) if total_tasks > 0 else 0.0
 
-    # Tasks by priority
     priority_counts = {p.value: 0 for p in TaskPriority}
     priority_results = db.query(TaskModel.priority, func.count(TaskModel.id)).filter(
+        TaskModel.is_deleted == False,
         (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
     ).group_by(TaskModel.priority).all()
     for priority_enum, count in priority_results:
         priority_counts[priority_enum.value] = count
 
-    # Tasks by status
     status_counts = {s.value: 0 for s in TaskStatus}
     status_results = db.query(TaskModel.status, func.count(TaskModel.id)).filter(
+        TaskModel.is_deleted == False,
         (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
     ).group_by(TaskModel.status).all()
     for status_enum, count in status_results:
         status_counts[status_enum.value] = count
 
-    # Attachments & Comments counts
     total_attachments = db.query(AttachmentModel).filter(AttachmentModel.owner_id == owner_id).count()
     total_comments = db.query(CommentModel).filter(CommentModel.author_id == owner_id).count()
 
@@ -314,7 +314,7 @@ def remove_tag_from_task(db: Session, db_task: TaskModel, db_tag: TagModel) -> T
     return db_task
 
 
-# Task CRUD Operations (User & Workspace Scoped)
+# Task CRUD Operations (User & Workspace Scoped with Soft Delete)
 def create_task(db: Session, task_in: TaskCreate, owner_id: int) -> TaskModel:
     """Create a new task record linked to an owner_id and optional workspace_id."""
     db_task = TaskModel(
@@ -324,7 +324,9 @@ def create_task(db: Session, task_in: TaskCreate, owner_id: int) -> TaskModel:
         priority=task_in.priority,
         due_date=task_in.due_date,
         owner_id=owner_id,
-        workspace_id=task_in.workspace_id
+        workspace_id=task_in.workspace_id,
+        is_deleted=False,
+        deleted_at=None
     )
     db.add(db_task)
     db.commit()
@@ -332,9 +334,13 @@ def create_task(db: Session, task_in: TaskCreate, owner_id: int) -> TaskModel:
     return db_task
 
 
-def get_task_by_id(db: Session, task_id: int, owner_id: int) -> Optional[TaskModel]:
+def get_task_by_id(db: Session, task_id: int, owner_id: int, include_deleted: bool = False) -> Optional[TaskModel]:
     """Retrieve a single task owned by user or in a workspace where user is a member."""
-    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    query = db.query(TaskModel).filter(TaskModel.id == task_id)
+    if not include_deleted:
+        query = query.filter(TaskModel.is_deleted == False)
+
+    task = query.first()
     if not task:
         return None
 
@@ -359,10 +365,11 @@ def get_tasks(
     search: Optional[str] = None,
     tag: Optional[str] = None
 ) -> Tuple[List[TaskModel], int]:
-    """Retrieve a paginated list of tasks owned by user or shared in user's workspaces."""
+    """Retrieve a paginated list of active non-deleted tasks owned by user or shared in user's workspaces."""
     user_workspace_ids = [w.id for w in get_user_workspaces(db=db, user_id=owner_id)]
 
     query = db.query(TaskModel).filter(
+        TaskModel.is_deleted == False,
         (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
     )
 
@@ -380,6 +387,15 @@ def get_tasks(
     return tasks, total
 
 
+def get_trashed_tasks(db: Session, owner_id: int) -> List[TaskModel]:
+    """Retrieve all soft-deleted tasks currently in the trash bin for user."""
+    user_workspace_ids = [w.id for w in get_user_workspaces(db=db, user_id=owner_id)]
+    return db.query(TaskModel).filter(
+        TaskModel.is_deleted == True,
+        (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False)
+    ).order_by(TaskModel.deleted_at.desc()).all()
+
+
 def update_task(db: Session, db_task: TaskModel, task_in: TaskUpdate) -> TaskModel:
     """Update an existing task record with non-null input fields."""
     update_data = task_in.model_dump(exclude_unset=True)
@@ -391,8 +407,26 @@ def update_task(db: Session, db_task: TaskModel, task_in: TaskUpdate) -> TaskMod
     return db_task
 
 
-def delete_task(db: Session, db_task: TaskModel) -> None:
-    """Delete a task record from the database."""
+def soft_delete_task(db: Session, db_task: TaskModel) -> TaskModel:
+    """Soft-delete a task record by setting is_deleted=True and timestamping deleted_at."""
+    db_task.is_deleted = True
+    db_task.deleted_at = utc_now()
+    db.commit()
+    db.refresh(db_task)
+    return db_task
+
+
+def restore_task(db: Session, db_task: TaskModel) -> TaskModel:
+    """Restore a soft-deleted task from trash bin."""
+    db_task.is_deleted = False
+    db_task.deleted_at = None
+    db.commit()
+    db.refresh(db_task)
+    return db_task
+
+
+def permanently_delete_task(db: Session, db_task: TaskModel) -> None:
+    """Permanently delete a task record from the database."""
     db.delete(db_task)
     db.commit()
 

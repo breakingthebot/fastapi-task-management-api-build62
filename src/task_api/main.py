@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, rate limiting, caching, and background tasks.
+# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, soft deletes, trash bin, rate limiting, caching, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py, src/task_api/rate_limiter.py
 # Created: 2026-08-02
 
@@ -44,7 +44,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, analytics dashboard, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, analytics dashboard, trash bin recovery, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -108,6 +108,74 @@ def get_task_analytics_endpoint(
     """Retrieve aggregated task counts, completion rates, priority distributions, and activity statistics."""
     analytics = crud.get_task_analytics(db=db, owner_id=current_user.id)
     return TaskAnalyticsResponse(**analytics)
+
+
+# Trash Bin & Soft Delete Endpoints
+@app.get("/trash/tasks", response_model=TaskListResponse, tags=["Trash Bin"], summary="List soft-deleted tasks in trash bin")
+def list_trashed_tasks_endpoint(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve all soft-deleted tasks currently resting in the user's trash bin."""
+    trashed = crud.get_trashed_tasks(db=db, owner_id=current_user.id)
+    return TaskListResponse(total=len(trashed), tasks=trashed)
+
+
+@app.post("/tasks/{task_id}/restore", response_model=TaskResponse, tags=["Trash Bin"], summary="Restore soft-deleted task from trash bin")
+def restore_task_endpoint(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Restore a soft-deleted task back into active task lists."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id, include_deleted=True)
+    if not db_task or not db_task.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Soft-deleted task with ID {task_id} not found in trash bin."
+        )
+
+    restored_task = crud.restore_task(db=db, db_task=db_task)
+    cache_service.invalidate_user_cache(current_user.id)
+
+    crud.create_activity_log(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        action="task.restored",
+        new_value=restored_task.title
+    )
+
+    return restored_task
+
+
+@app.delete("/trash/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Trash Bin"], summary="Permanently purge task from trash bin")
+def permanently_delete_task_endpoint(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Permanently delete a task record from the database."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id, include_deleted=True)
+    if not db_task or not db_task.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Soft-deleted task with ID {task_id} not found in trash bin."
+        )
+
+    task_title = db_task.title
+    crud.permanently_delete_task(db=db, db_task=db_task)
+    cache_service.invalidate_user_cache(current_user.id)
+
+    crud.create_activity_log(
+        db=db,
+        task_id=None,
+        owner_id=current_user.id,
+        action="task.permanently_deleted",
+        old_value=task_title
+    )
+
+    return None
 
 
 # Authentication Endpoints
@@ -539,14 +607,14 @@ def update_task_endpoint(
     return updated_task
 
 
-@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"], summary="Delete task by ID")
+@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"], summary="Soft-delete task by ID")
 def delete_task_endpoint(
     task_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Remove a task record (Requires Owner or Admin in workspace)."""
+    """Soft-delete a task record and move it to the trash bin (Requires Owner or Admin in workspace)."""
     db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
     if not db_task:
         raise HTTPException(
@@ -561,14 +629,14 @@ def delete_task_endpoint(
 
     deleted_id = db_task.id
     task_title = db_task.title
-    crud.delete_task(db=db, db_task=db_task)
+    crud.soft_delete_task(db=db, db_task=db_task)
     cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(
         db=db,
-        task_id=None,
+        task_id=deleted_id,
         owner_id=current_user.id,
-        action="task.deleted",
+        action="task.soft_deleted",
         old_value=task_title
     )
 

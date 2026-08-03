@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-02
+
+### Added
+- Soft Deletes and Task Trash Bin Recovery system.
+- Added `is_deleted` (Boolean) and `deleted_at` (DateTime) columns to `TaskModel` in `src/task_api/models.py`.
+- Updated `DELETE /tasks/{task_id}` to soft-delete tasks rather than immediately purging records.
+- Endpoint `GET /trash/tasks` listing all soft-deleted tasks resting in user's trash bin.
+- Endpoint `POST /tasks/{task_id}/restore` restoring soft-deleted tasks back into active task lists.
+- Endpoint `DELETE /trash/tasks/{task_id}` for permanently purging tasks from database.
+- Soft delete test suite in `tests/test_soft_delete.py` verifying soft deletion, trash bin listing, restoration, and permanent purging.
+
 ## [0.12.0] - 2026-08-02
 
 ### Added

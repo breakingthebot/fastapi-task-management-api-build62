@@ -270,6 +270,8 @@ class TaskResponse(TaskBase):
     id: int
     owner_id: int
     workspace_id: Optional[int] = None
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     tags: List[TagResponse] = []

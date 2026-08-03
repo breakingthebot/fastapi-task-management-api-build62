@@ -1,6 +1,6 @@
 # Task Management API (Build 62)
 
-A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, team workspaces & RBAC role-based access control (Admin, Editor, Viewer), task analytics dashboard statistics, rate limiting & sliding-window throttling (HTTP 429), task comments & discussion threads, file attachment uploads, task tagging & multi-category labeling, webhooks & real-time event subscriptions (HMAC-SHA256 signed), task activity audit trail logging, response caching & performance optimization (write-invalidation), background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
+A production-ready FastAPI REST service providing user authentication (JWT + bcrypt), task management lifecycle features, CRUD operations, team workspaces & RBAC role-based access control (Admin, Editor, Viewer), soft deletes & trash bin recovery, task analytics dashboard statistics, rate limiting & sliding-window throttling (HTTP 429), task comments & discussion threads, file attachment uploads, task tagging & multi-category labeling, webhooks & real-time event subscriptions (HMAC-SHA256 signed), task activity audit trail logging, response caching & performance optimization (write-invalidation), background task processing (email alerts & CSV exports), and interactive OpenAPI documentation.
 
 ## Stack
 - **Language**: Python 3.12+
@@ -71,16 +71,17 @@ pytest -v
 
 ## API Usage & Features
 1. **Register & Login**: `POST /auth/register` & `POST /auth/login` to obtain a Bearer JWT access token.
-2. **Task Analytics & Dashboard Metrics**: `GET /analytics/tasks` returning aggregated task totals, completion rate %, priority breakdown, status counts, attachment totals, and discussion comment metrics.
-3. **Rate Limiting & Throttling**: Sliding-window counter protecting `/auth/login` (5 req/min) and general endpoints with `HTTP 429` and `Retry-After` headers.
-4. **Task Comments & Discussion Threads**: `POST /tasks/{task_id}/comments`, `GET /tasks/{task_id}/comments`, `DELETE /comments/{comment_id}`.
-5. **Team Workspaces & RBAC**: `POST /workspaces`, `GET /workspaces`, `POST /workspaces/{id}/members` (Admin, Editor, Viewer roles).
-6. **Response Caching**: `GET /tasks` responses are cached per user with `X-Cache: HIT`/`MISS` headers and write-invalidation.
-7. **Task Activity Audit Trail**: `GET /tasks/{task_id}/activity` & `GET /activity` returning revision entries and field diffs.
-8. **Webhooks**: `POST /webhooks`, `GET /webhooks`, `DELETE /webhooks/{webhook_id}` with HMAC-SHA256 signature headers.
-9. **Category Tagging**: `POST /tags`, `GET /tags`, `POST /tasks/{task_id}/tags/{tag_id}`, `DELETE /tasks/{task_id}/tags/{tag_id}`, `GET /tasks?tag=Work`.
-10. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
-11. **Background CSV Export & Priority Alerts**: `POST /tasks/export` and `GET /exports/{filename}/download`.
+2. **Soft Deletes & Trash Bin Recovery**: `DELETE /tasks/{id}` soft-deletes a task. View trash bin via `GET /trash/tasks`, restore via `POST /tasks/{id}/restore`, or permanently purge via `DELETE /trash/tasks/{id}`.
+3. **Task Analytics & Dashboard Metrics**: `GET /analytics/tasks` returning aggregated task totals, completion rate %, priority breakdown, status counts, attachment totals, and discussion comment metrics.
+4. **Rate Limiting & Throttling**: Sliding-window counter protecting `/auth/login` (5 req/min) and general endpoints with `HTTP 429` and `Retry-After` headers.
+5. **Task Comments & Discussion Threads**: `POST /tasks/{task_id}/comments`, `GET /tasks/{task_id}/comments`, `DELETE /comments/{comment_id}`.
+6. **Team Workspaces & RBAC**: `POST /workspaces`, `GET /workspaces`, `POST /workspaces/{id}/members` (Admin, Editor, Viewer roles).
+7. **Response Caching**: `GET /tasks` responses are cached per user with `X-Cache: HIT`/`MISS` headers and write-invalidation.
+8. **Task Activity Audit Trail**: `GET /tasks/{task_id}/activity` & `GET /activity` returning revision entries and field diffs.
+9. **Webhooks**: `POST /webhooks`, `GET /webhooks`, `DELETE /webhooks/{webhook_id}` with HMAC-SHA256 signature headers.
+10. **Category Tagging**: `POST /tags`, `GET /tags`, `POST /tasks/{task_id}/tags/{tag_id}`, `DELETE /tasks/{task_id}/tags/{tag_id}`, `GET /tasks?tag=Work`.
+11. **Task Attachments**: Upload and manage file attachments using `POST /tasks/{id}/attachments`.
+12. **Background CSV Export & Priority Alerts**: `POST /tasks/export` and `GET /exports/{filename}/download`.
 
 ## Architecture Notes
 The application is structured into atomic Python modules under `src/task_api/`:
@@ -91,15 +92,15 @@ The application is structured into atomic Python modules under `src/task_api/`:
 - `cache.py`: High-performance thread-safe caching service (`CacheService`) with pattern invalidation.
 - `models.py`: Database ORM models (`UserModel`, `TaskModel`, `AttachmentModel`, `TagModel`, `WebhookModel`, `ActivityLogModel`, `WorkspaceModel`, `WorkspaceMemberModel`, `CommentModel`).
 - `schemas.py`: Pydantic input/output schemas for Users, Tasks, Workspaces, Members, Comments, Attachments, Tags, Webhooks, Activity Logs, Analytics, and Export responses.
-- `crud.py`: Encapsulated database queries filtering data by authenticated `owner_id` and workspace membership.
+- `crud.py`: Encapsulated database queries filtering data by authenticated `owner_id`, workspace membership, and active soft-delete status.
 - `services.py`: Background processing routines for non-blocking email alerts, CSV file generation, and HMAC-SHA256 webhook event dispatches.
-- `main.py`: FastAPI application router mounting all REST endpoints, rate limit middleware, RBAC middleware, caching, and BackgroundTasks dependencies.
+- `main.py`: FastAPI application router mounting all REST endpoints, rate limit middleware, RBAC middleware, trash bin handlers, caching, and BackgroundTasks dependencies.
 - `cli.py`: Command Line Interface entry point supporting `--version` and `run` commands.
 
 ## Data Handling
-- **Data Collected**: User credentials, workspace details, team member roles, task details, discussion comments, category tags, file attachments, webhook URLs/secrets, activity audit logs, and exported CSV data files.
+- **Data Collected**: User credentials, workspace details, team member roles, task details, soft delete timestamps, discussion comments, category tags, file attachments, webhook URLs/secrets, activity audit logs, and exported CSV data files.
 - **Storage**: Retained locally in SQLite database (`DATABASE_URL`), in-memory cache, and disk storage directories (`./uploads`, `./uploads/exports`).
-- **Sharing**: Zero third-party data sharing. Analytics are calculated strictly for the authenticated user and their shared team workspaces.
+- **Sharing**: Zero third-party data sharing. Soft-deleted tasks are retained in trash bin for recovery or permanent purging by task owner or workspace admin.
 
 ## Notes
-- Task Analytics: Dynamically calculates completion percentages and status/priority distributions via SQL aggregation.
+- Soft Deletes: Tasks deleted via `DELETE /tasks/{id}` set `is_deleted=True` and `deleted_at=timestamp`. Active lists automatically filter out soft-deleted items.

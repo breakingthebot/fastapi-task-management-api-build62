@@ -1,5 +1,5 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, Workspaces, RBAC, and Comments.
+# SQLAlchemy ORM Data Models for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, Workspaces, RBAC, Comments, and Soft Deletes.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -107,7 +107,7 @@ class TagModel(Base):
 
 
 class TaskModel(Base):
-    """SQLAlchemy Task model storing user task records."""
+    """SQLAlchemy Task model storing user task records with soft delete support."""
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -118,6 +118,8 @@ class TaskModel(Base):
     due_date = Column(DateTime, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
