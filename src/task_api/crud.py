@@ -1,12 +1,12 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, Analytics, and Soft Delete objects.
+# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, Analytics, Soft Delete, and Search operations.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 import secrets
 from typing import Optional, List, Tuple, Dict
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from task_api.models import (
     UserModel, TaskModel, AttachmentModel, TagModel, WebhookModel, ActivityLogModel,
     WorkspaceModel, WorkspaceMemberModel, CommentModel, WorkspaceRole, TaskStatus, TaskPriority, utc_now
@@ -314,7 +314,7 @@ def remove_tag_from_task(db: Session, db_task: TaskModel, db_tag: TagModel) -> T
     return db_task
 
 
-# Task CRUD Operations (User & Workspace Scoped with Soft Delete)
+# Task CRUD Operations (User & Workspace Scoped with Soft Delete & Search)
 def create_task(db: Session, task_in: TaskCreate, owner_id: int) -> TaskModel:
     """Create a new task record linked to an owner_id and optional workspace_id."""
     db_task = TaskModel(
@@ -385,6 +385,33 @@ def get_tasks(
     total = query.count()
     tasks = query.order_by(TaskModel.id.desc()).offset(skip).limit(limit).all()
     return tasks, total
+
+
+def search_tasks_full_text(db: Session, owner_id: int, query_str: str) -> List[TaskModel]:
+    """Search active tasks across title, description, and discussion comments."""
+    user_workspace_ids = [w.id for w in get_user_workspaces(db=db, user_id=owner_id)]
+
+    search_pattern = f"%{query_str}%"
+
+    # Tasks matching title or description
+    direct_matches = db.query(TaskModel).filter(
+        TaskModel.is_deleted == False,
+        (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False),
+        or_(
+            TaskModel.title.ilike(search_pattern),
+            TaskModel.description.ilike(search_pattern)
+        )
+    )
+
+    # Tasks matching discussion comment content
+    comment_matches = db.query(TaskModel).join(CommentModel, TaskModel.id == CommentModel.task_id).filter(
+        TaskModel.is_deleted == False,
+        (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False),
+        CommentModel.content.ilike(search_pattern)
+    )
+
+    all_matches = direct_matches.union(comment_matches).order_by(TaskModel.id.desc()).all()
+    return all_matches
 
 
 def get_trashed_tasks(db: Session, owner_id: int) -> List[TaskModel]:

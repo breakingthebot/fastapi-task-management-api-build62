@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, soft deletes, trash bin, rate limiting, caching, and background tasks.
+# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, soft deletes, trash bin, search, rate limiting, caching, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py, src/task_api/rate_limiter.py
 # Created: 2026-08-02
 
@@ -44,7 +44,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, analytics dashboard, trash bin recovery, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, analytics dashboard, trash bin recovery, full-text search, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -97,6 +97,18 @@ def health_check():
 def version_endpoint():
     """Return current API version string."""
     return {"version": __version__}
+
+
+# Full-Text Search Endpoint
+@app.get("/tasks/search", response_model=TaskListResponse, tags=["Search"], summary="Full-text keyword search across titles, descriptions, and comments")
+def search_tasks_endpoint(
+    q: str = Query(..., min_length=1, max_length=100, description="Search keyword query string"),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Perform keyword search matching titles, descriptions, and discussion comments."""
+    matching_tasks = crud.search_tasks_full_text(db=db, owner_id=current_user.id, query_str=q)
+    return TaskListResponse(total=len(matching_tasks), tasks=matching_tasks)
 
 
 # Analytics Endpoint

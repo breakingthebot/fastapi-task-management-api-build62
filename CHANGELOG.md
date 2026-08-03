@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-02
+
+### Added
+- Search Indexing & Full-Text Filters system.
+- Endpoint `GET /tasks/search?q=query` enabling keyword matching across task titles, task descriptions, and task discussion comments.
+- Full-text search SQL aggregation query function `search_tasks_full_text` in `src/task_api/crud.py` with multi-tenant and workspace scoping.
+- Search test suite in `tests/test_search.py` validating multi-field keyword matching across titles, descriptions, and comments.
+
 ## [0.13.0] - 2026-08-02
 
 ### Added
