@@ -1,5 +1,5 @@
 # src/task_api/crud.py
-# Database interaction logic and queries for User, Task, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, Analytics, Soft Delete, and Search operations.
+# Database interaction logic and queries for User, Task, Subtasks & Dependencies, Attachment, Tag, Webhook, ActivityLog, Workspace, Comment, Analytics, Soft Delete, and Search operations.
 # Connects to: src/task_api/models.py, src/task_api/schemas.py, src/task_api/auth.py
 # Created: 2026-08-02
 
@@ -314,9 +314,14 @@ def remove_tag_from_task(db: Session, db_task: TaskModel, db_tag: TagModel) -> T
     return db_task
 
 
-# Task CRUD Operations (User & Workspace Scoped with Soft Delete & Search)
+# Task CRUD Operations (User & Workspace Scoped with Soft Delete, Subtasks & Dependencies)
 def create_task(db: Session, task_in: TaskCreate, owner_id: int) -> TaskModel:
-    """Create a new task record linked to an owner_id and optional workspace_id."""
+    """Create a new task record linked to an owner_id, optional workspace_id, and optional parent_id."""
+    if task_in.parent_id:
+        parent_task = db.query(TaskModel).filter(TaskModel.id == task_in.parent_id, TaskModel.is_deleted == False).first()
+        if not parent_task:
+            raise ValueError(f"Parent task with ID {task_in.parent_id} does not exist.")
+
     db_task = TaskModel(
         title=task_in.title,
         description=task_in.description,
@@ -325,6 +330,7 @@ def create_task(db: Session, task_in: TaskCreate, owner_id: int) -> TaskModel:
         due_date=task_in.due_date,
         owner_id=owner_id,
         workspace_id=task_in.workspace_id,
+        parent_id=task_in.parent_id,
         is_deleted=False,
         deleted_at=None
     )
@@ -387,13 +393,20 @@ def get_tasks(
     return tasks, total
 
 
+def get_subtasks(db: Session, parent_id: int, owner_id: int) -> List[TaskModel]:
+    """Retrieve all active subtasks for a parent task."""
+    return db.query(TaskModel).filter(
+        TaskModel.parent_id == parent_id,
+        TaskModel.is_deleted == False
+    ).order_by(TaskModel.id.asc()).all()
+
+
 def search_tasks_full_text(db: Session, owner_id: int, query_str: str) -> List[TaskModel]:
     """Search active tasks across title, description, and discussion comments."""
     user_workspace_ids = [w.id for w in get_user_workspaces(db=db, user_id=owner_id)]
 
     search_pattern = f"%{query_str}%"
 
-    # Tasks matching title or description
     direct_matches = db.query(TaskModel).filter(
         TaskModel.is_deleted == False,
         (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False),
@@ -403,7 +416,6 @@ def search_tasks_full_text(db: Session, owner_id: int, query_str: str) -> List[T
         )
     )
 
-    # Tasks matching discussion comment content
     comment_matches = db.query(TaskModel).join(CommentModel, TaskModel.id == CommentModel.task_id).filter(
         TaskModel.is_deleted == False,
         (TaskModel.owner_id == owner_id) | (TaskModel.workspace_id.in_(user_workspace_ids) if user_workspace_ids else False),
@@ -424,8 +436,29 @@ def get_trashed_tasks(db: Session, owner_id: int) -> List[TaskModel]:
 
 
 def update_task(db: Session, db_task: TaskModel, task_in: TaskUpdate) -> TaskModel:
-    """Update an existing task record with non-null input fields."""
+    """Update an existing task record with non-null input fields and subtask completion validation."""
     update_data = task_in.model_dump(exclude_unset=True)
+
+    # Validate parent_id
+    new_parent_id = update_data.get("parent_id")
+    if new_parent_id is not None:
+        if new_parent_id == db_task.id:
+            raise ValueError("A task cannot be set as its own parent.")
+        parent_task = db.query(TaskModel).filter(TaskModel.id == new_parent_id, TaskModel.is_deleted == False).first()
+        if not parent_task:
+            raise ValueError(f"Parent task with ID {new_parent_id} does not exist.")
+
+    # Validate task completion constraint: Cannot complete task if active subtasks are incomplete
+    new_status = update_data.get("status")
+    if new_status == TaskStatus.COMPLETED:
+        incomplete_subtasks = db.query(TaskModel).filter(
+            TaskModel.parent_id == db_task.id,
+            TaskModel.is_deleted == False,
+            TaskModel.status != TaskStatus.COMPLETED
+        ).count()
+        if incomplete_subtasks > 0:
+            raise ValueError(f"Cannot complete task while {incomplete_subtasks} subtask(s) remain incomplete.")
+
     for field, value in update_data.items():
         setattr(db_task, field, value)
 

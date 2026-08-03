@@ -249,6 +249,7 @@ class TaskBase(BaseModel):
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM, description="Priority rating")
     due_date: Optional[datetime] = Field(None, description="Optional ISO timestamp due date")
     workspace_id: Optional[int] = Field(None, description="Optional workspace ID linking task to team workspace")
+    parent_id: Optional[int] = Field(None, description="Optional parent task ID for subtask relationships")
 
 
 class TaskCreate(TaskBase):
@@ -263,6 +264,7 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     priority: Optional[TaskPriority] = None
     due_date: Optional[datetime] = None
+    parent_id: Optional[int] = None
 
 
 class TaskResponse(TaskBase):
@@ -270,6 +272,7 @@ class TaskResponse(TaskBase):
     id: int
     owner_id: int
     workspace_id: Optional[int] = None
+    parent_id: Optional[int] = None
     is_deleted: bool = False
     deleted_at: Optional[datetime] = None
     created_at: datetime

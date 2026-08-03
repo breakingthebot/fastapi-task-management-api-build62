@@ -1,5 +1,5 @@
 # src/task_api/main.py
-# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, soft deletes, trash bin, search, rate limiting, caching, and background tasks.
+# FastAPI application entry point defining auth, tasks, subtasks & dependencies, attachments, tags, webhooks, activity logs, workspaces, comments, analytics, soft deletes, trash bin, search, rate limiting, caching, and background tasks.
 # Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py, src/task_api/rate_limiter.py
 # Created: 2026-08-02
 
@@ -44,7 +44,7 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, analytics dashboard, trash bin recovery, full-text search, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, subtask dependencies, team workspaces, RBAC roles, analytics dashboard, trash bin recovery, full-text search, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -120,6 +120,22 @@ def get_task_analytics_endpoint(
     """Retrieve aggregated task counts, completion rates, priority distributions, and activity statistics."""
     analytics = crud.get_task_analytics(db=db, owner_id=current_user.id)
     return TaskAnalyticsResponse(**analytics)
+
+
+# Subtasks & Dependencies Endpoint
+@app.get("/tasks/{task_id}/subtasks", response_model=TaskListResponse, tags=["Subtasks"], summary="List all subtasks for a parent task")
+def list_subtasks_endpoint(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve all active subtasks assigned under a specific parent task."""
+    db_task = crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not db_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Parent task with ID {task_id} not found.")
+
+    subtasks = crud.get_subtasks(db=db, parent_id=task_id, owner_id=current_user.id)
+    return TaskListResponse(total=len(subtasks), tasks=subtasks)
 
 
 # Trash Bin & Soft Delete Endpoints
@@ -496,7 +512,11 @@ def create_task_endpoint(
                 detail="Viewer role cannot create tasks in workspace."
             )
 
-    db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
+    try:
+        db_task = crud.create_task(db=db, task_in=task_in, owner_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     cache_service.invalidate_user_cache(current_user.id)
 
     crud.create_activity_log(
@@ -610,7 +630,11 @@ def update_task_endpoint(
                 new_value=str(new_val)
             )
 
-    updated_task = crud.update_task(db=db, db_task=db_task, task_in=task_in)
+    try:
+        updated_task = crud.update_task(db=db, db_task=db_task, task_in=task_in)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     cache_service.invalidate_user_cache(current_user.id)
 
     task_data = {"id": updated_task.id, "title": updated_task.title, "status": updated_task.status.value, "priority": updated_task.priority.value}

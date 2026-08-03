@@ -2,4 +2,4 @@
 # Task Management API package initializer.
 # Created: 2026-08-02
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"

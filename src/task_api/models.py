@@ -1,12 +1,12 @@
 # src/task_api/models.py
-# SQLAlchemy ORM Data Models for Users, Tasks, Attachments, Tags, Webhooks, Activity Logs, Workspaces, RBAC, Comments, and Soft Deletes.
+# SQLAlchemy ORM Data Models for Users, Tasks, Subtasks & Dependencies, Attachments, Tags, Webhooks, Activity Logs, Workspaces, RBAC, Comments, and Soft Deletes.
 # Connects to: src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py
 # Created: 2026-08-02
 
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, ForeignKey, Boolean, Table
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from task_api.database import Base
 
 
@@ -107,7 +107,7 @@ class TagModel(Base):
 
 
 class TaskModel(Base):
-    """SQLAlchemy Task model storing user task records with soft delete support."""
+    """SQLAlchemy Task model storing user task records with subtask parent dependencies."""
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -118,6 +118,7 @@ class TaskModel(Base):
     due_date = Column(DateTime, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
+    parent_id = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
     is_deleted = Column(Boolean, default=False, nullable=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
@@ -125,6 +126,7 @@ class TaskModel(Base):
 
     owner = relationship("UserModel", back_populates="tasks")
     workspace = relationship("WorkspaceModel", back_populates="tasks")
+    subtasks = relationship("TaskModel", backref=backref("parent", remote_side=[id]), cascade="all")
     attachments = relationship("AttachmentModel", back_populates="task", cascade="all, delete-orphan")
     tags = relationship("TagModel", secondary=task_tags, back_populates="tasks")
     activity_logs = relationship("ActivityLogModel", back_populates="task", cascade="all, delete-orphan")
