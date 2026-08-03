@@ -1,13 +1,13 @@
 # src/task_api/main.py
-# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, RBAC, caching, and background tasks.
-# Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py
+# FastAPI application entry point defining auth, tasks, attachments, tags, webhooks, activity logs, workspaces, comments, RBAC, rate limiting, caching, and background tasks.
+# Connects to: src/task_api/config.py, src/task_api/database.py, src/task_api/crud.py, src/task_api/auth.py, src/task_api/services.py, src/task_api/cache.py, src/task_api/rate_limiter.py
 # Created: 2026-08-02
 
 import os
 import uuid
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response, status
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response, Request, status
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -31,6 +31,7 @@ from task_api import crud
 from task_api.auth import verify_password, create_access_token, get_current_user
 from task_api.services import send_urgent_task_notification, generate_task_csv_export, dispatch_webhook_event
 from task_api.cache import cache_service
+from task_api.rate_limiter import rate_limiter
 
 # Create database tables automatically on startup
 Base.metadata.create_all(bind=engine)
@@ -42,12 +43,41 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, discussion comments, attachments, tags, webhooks, audit logs, caching, and background tasks.",
+    description="A robust FastAPI REST service providing JWT auth, task CRUD, team workspaces, RBAC roles, discussion comments, rate limiting, attachments, tags, webhooks, audit logs, caching, and background tasks.",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
+
+
+# Rate Limiting Middleware
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Enforce sliding-window request throttling per client IP address."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    # Strict limit on login requests (5 per 60 seconds)
+    if request.url.path == "/auth/login" and request.method == "POST":
+        allowed, retry_after = rate_limiter.check_rate_limit(f"login:{client_ip}", max_requests=5, window_seconds=60)
+        if not allowed:
+            return Response(
+                content='{"detail": "Too many login attempts. Please try again later."}',
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after), "Content-Type": "application/json"}
+            )
+    else:
+        # General limit on all other endpoints (1000 per 60 seconds)
+        allowed, retry_after = rate_limiter.check_rate_limit(f"general:{client_ip}", max_requests=1000, window_seconds=60)
+        if not allowed:
+            return Response(
+                content='{"detail": "Rate limit exceeded. Please try again later."}',
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after), "Content-Type": "application/json"}
+            )
+
+    response = await call_next(request)
+    return response
 
 
 # System & Health Endpoints
@@ -255,7 +285,6 @@ def delete_comment_endpoint(
     if not db_task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
 
-    # Access check: Author or Workspace Admin
     is_author = (db_comment.author_id == current_user.id)
     is_admin = False
     if db_task.workspace_id:

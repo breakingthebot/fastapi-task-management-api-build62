@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "task-management-api"
-version = "0.10.0"
-description = "FastAPI Task Management API — full CRUD, JWT authentication, team workspaces, RBAC roles, discussion comments, file uploads, webhooks, activity audit logs, Redis caching, background tasks, OpenAPI docs"
+version = "0.11.0"
+description = "FastAPI Task Management API — full CRUD, JWT authentication, team workspaces, RBAC roles, discussion comments, rate limiting, file uploads, webhooks, activity audit logs, Redis caching, background tasks, OpenAPI docs"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

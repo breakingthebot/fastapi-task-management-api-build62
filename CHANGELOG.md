@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-02
+
+### Added
+- Rate Limiting and API Throttling system in `src/task_api/rate_limiter.py`.
+- Thread-safe sliding-window `RateLimiter` service tracking request timestamps per client IP.
+- Rate limiting middleware in `src/task_api/main.py` enforcing throttling on authentication endpoints (`POST /auth/login` max 5 requests per minute) and general API routes.
+- Response header `Retry-After` on rate limit breaches accompanied by `HTTP 429 Too Many Requests` status code.
+- Shared pytest autouse fixture in `tests/conftest.py` ensuring test isolation by resetting rate limit state between test cases.
+- Rate limiter test suite in `tests/test_rate_limiter.py` covering unit window calculations, burst request rejection, and HTTP 429 integration headers.
+
 ## [0.10.0] - 2026-08-02
 
 ### Added
